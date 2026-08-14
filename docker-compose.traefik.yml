@@ -1,0 +1,75 @@
+# =============================================================================
+# Publicación detrás del Traefik de Coolify.
+#
+# Se usa junto al compose principal, no en lugar de él:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.traefik.yml up -d --build
+#   docker network connect vmstats-publica coolify-proxy   # una sola vez
+#
+# Sirve cuando vmstats corre en la misma VM que Coolify pero no está gestionado
+# por él —por ejemplo, si la organización de GitHub tiene deshabilitadas las
+# deploy keys y Coolify no puede clonar el repositorio—. El certificado y la
+# terminación TLS los sigue haciendo el mismo Traefik que atiende al resto de
+# los dominios de la máquina.
+#
+# Dos decisiones que importan:
+#
+#   - El puerto se republica en 127.0.0.1. En el compose principal se publica
+#     en todas las interfaces, que es lo correcto para desarrollo; acá no,
+#     porque dejaría la consola accesible por IP y sin TLS, esquivando el
+#     proxy. `!override` reemplaza la lista en vez de sumarse a ella.
+#   - `web` entra en una segunda red, `publica`, y es lo único que entra. El
+#     proxy no debe poder ver ni a `postgres` ni al `socket-proxy`, así que
+#     `interna` y `docker-interna` no se tocan.
+# =============================================================================
+
+services:
+  # El collector consulta la API de Coolify. En esta VM no puede hacerlo por la
+  # IP del host: ufw bloquea el tránsito desde las redes de Docker hacia el
+  # puerto publicado. Entrando a la red propia de Coolify lo alcanza por nombre,
+  # sin pasar por el firewall y sin exponer nada.
+  #
+  # Con esto, COOLIFY_BASE_URL vale http://coolify:8080.
+  collector:
+    networks:
+      - interna
+      - docker-interna
+      - coolify
+
+  web:
+    ports: !override
+      - '127.0.0.1:${VMSTATS_PUERTO:-4321}:4321'
+    networks:
+      - interna
+      - publica
+    labels:
+      - traefik.enable=true
+      # Con más de una red hay que decirle a Traefik por cuál hablar; si no,
+      # elige cualquiera y puede quedarse con una a la que no está conectado.
+      - traefik.docker.network=vmstats-publica
+      - traefik.http.services.vmstats.loadbalancer.server.port=4321
+
+      - traefik.http.routers.vmstats-http.entryPoints=http
+      - traefik.http.routers.vmstats-http.rule=Host(`${VMSTATS_DOMINIO}`) || Host(`${VMSTATS_DOMINIO_ALTERNO:-vmstats.invalid}`)
+      - traefik.http.routers.vmstats-http.middlewares=vmstats-a-https
+      - traefik.http.middlewares.vmstats-a-https.redirectscheme.scheme=https
+
+      - traefik.http.routers.vmstats-https.entryPoints=https
+      - traefik.http.routers.vmstats-https.rule=Host(`${VMSTATS_DOMINIO}`) || Host(`${VMSTATS_DOMINIO_ALTERNO:-vmstats.invalid}`)
+      - traefik.http.routers.vmstats-https.tls=true
+      - traefik.http.routers.vmstats-https.tls.certresolver=letsencrypt
+      - traefik.http.routers.vmstats-https.service=vmstats
+      # Sin compresión, el SSE puede quedarse en un buffer intermedio. Traefik
+      # excluye `text/event-stream` de `compress`, así que la franja de tiempo
+      # real sigue llegando en cuanto se emite.
+      - traefik.http.routers.vmstats-https.middlewares=vmstats-gzip
+      - traefik.http.middlewares.vmstats-gzip.compress=true
+
+networks:
+  publica:
+    name: vmstats-publica
+    driver: bridge
+  # La crea Coolify al instalarse. `web` no entra acá: sólo el collector, y sólo
+  # para leer la API.
+  coolify:
+    external: true
