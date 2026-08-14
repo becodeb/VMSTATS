@@ -1,0 +1,46 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "react", "jsx-a11y", "import"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "warn"
+  },
+  "env": {
+    "browser": true,
+    "node": true,
+    "es2024": true
+  },
+  "rules": {
+    "typescript/no-explicit-any": "error",
+    "unicorn/prefer-node-protocol": "error",
+    "no-console": "off",
+
+    "jsx-a11y/alt-text": "error",
+    "jsx-a11y/aria-props": "error",
+    "jsx-a11y/role-has-required-aria-props": "error",
+    "jsx-a11y/anchor-is-valid": "error",
+    "jsx-a11y/no-redundant-roles": "error",
+    "react/jsx-key": "error",
+
+    "react/react-in-jsx-scope": "off",
+    "eslint/no-await-in-loop": "off",
+    "react/no-unstable-nested-components": ["error", { "allowAsProps": true }],
+    "react/no-array-index-key": "off",
+    "import/no-named-as-default-member": "off",
+    "import/no-unassigned-import": "off",
+    "jsx-a11y/prefer-tag-over-role": "off",
+    "jsx-a11y/no-noninteractive-element-to-interactive-role": "off",
+    "jsx-a11y/heading-has-content": "off",
+    "jsx-a11y/label-has-associated-control": "off"
+  },
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/.astro/**",
+    "**/node_modules/**",
+    "**/*.d.ts",
+    "**/*.d.mts",
+    "playwright-report/**",
+    "test-results/**"
+  ]
+}

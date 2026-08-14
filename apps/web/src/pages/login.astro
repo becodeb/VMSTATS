@@ -1,0 +1,74 @@
+---
+import Base from '@/layouts/Base.astro'
+import { FormularioLogin } from '@/componentes/FormularioLogin'
+import { base } from '@/lib/base'
+import { usuarios } from '@vmstats/db'
+import { sql } from 'drizzle-orm'
+
+/**
+ * Página de inicio de sesión.
+ *
+ * Si todavía no existe ningún usuario, en vez del formulario se explica cómo
+ * crear el primer administrador. La spec prohíbe credenciales por defecto, así
+ * que una instalación recién desplegada no tiene con qué entrar — y esa
+ * pantalla es la diferencia entre «está roto» y «falta este paso».
+ */
+
+// `?siguiente=` lo pone el middleware. Se valida que sea una ruta interna:
+// sin esto, `?siguiente=https://otro-sitio` convierte el login en un redirector
+// abierto y sirve para phishing.
+const crudo = Astro.url.searchParams.get('siguiente') ?? '/dashboard'
+const siguiente = crudo.startsWith('/') && !crudo.startsWith('//') ? crudo : '/dashboard'
+
+let hayUsuarios = true
+let baseCaida = false
+
+try {
+  const filas = await base()
+    .select({ n: sql<number>`count(*)::int` })
+    .from(usuarios)
+  hayUsuarios = (filas[0]?.n ?? 0) > 0
+} catch {
+  baseCaida = true
+}
+---
+
+<Base titulo="Entrar · vmstats">
+  <main id="contenido" class="flex min-h-dvh items-center justify-center px-4 py-12">
+    <div class="w-full max-w-sm">
+      <div class="mb-8 flex flex-col gap-1">
+        <span class="text-xl font-semibold tracking-tight">vmstats</span>
+        <span class="text-muted-foreground text-sm">Estado de la infraestructura</span>
+      </div>
+
+      {
+        baseCaida ? (
+          <div class="border-critico/30 bg-critico-suave rounded-lg border px-4 py-3 text-sm">
+            <p class="mb-1 font-medium">La base de datos no responde</p>
+            <p class="text-muted-foreground">
+              El servidor está en pie pero no puede llegar a PostgreSQL. Revisá que el
+              servicio esté levantado y que <code class="font-mono text-xs">DATABASE_URL</code>
+              sea correcta.
+            </p>
+          </div>
+        ) : hayUsuarios ? (
+          <FormularioLogin siguiente={siguiente} client:load />
+        ) : (
+          <div class="border-border bg-muted/40 rounded-lg border px-4 py-3 text-sm">
+            <p class="mb-2 font-medium">Todavía no hay ningún usuario</p>
+            <p class="text-muted-foreground mb-3">
+              vmstats no crea credenciales por defecto. Creá el primer administrador
+              desde el servidor:
+            </p>
+            <pre
+              class="bg-card border-border overflow-x-auto rounded-md border p-3 font-mono text-xs"><code>docker compose exec web npm run bootstrap:admin</code></pre>
+          </div>
+        )
+      }
+
+      <p class="text-muted-foreground mt-8 text-xs">
+        Los datos de esta consola nunca salen de tu VM.
+      </p>
+    </div>
+  </main>
+</Base>

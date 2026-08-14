@@ -1,0 +1,45 @@
+---
+import '@/styles/global.css'
+import { SCRIPT_TEMA } from '@/tema/script.mjs'
+
+interface Props {
+  titulo: string
+  descripcion?: string
+}
+
+const { titulo, descripcion } = Astro.props
+---
+
+<!doctype html>
+<html lang="es" class="h-full">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{titulo}</title>
+    {descripcion && <meta name="description" content={descripcion} />}
+    <meta name="color-scheme" content="light dark" />
+    {/* Una consola interna no tiene nada que hacer en un buscador. */}
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+
+    {/*
+      El tema se aplica antes del primer pintado.
+      Bloqueante y sin `defer` a propósito: si corriera después, la página se
+      dibujaría un frame en claro y saltaría a oscuro. `is:inline` lo deja
+      fuera del pipeline de Astro, así que su hash se declara a mano en
+      `astro.config.mjs` para que el CSP lo permita.
+    */}
+    <script is:inline set:html={SCRIPT_TEMA} />
+  </head>
+
+  <body class="flex min-h-dvh flex-col">
+    {/* Salto al contenido: primer tabulador de la página. */}
+    <a
+      href="#contenido"
+      class="solo-lectores solo-lectores-al-enfocar bg-card focus:ring-ring absolute top-2 left-2 z-50 rounded-md border px-3 py-2 text-sm focus:ring-2"
+    >
+      Saltar al contenido
+    </a>
+    <slot />
+  </body>
+</html>

@@ -1,0 +1,62 @@
+---
+import Base from '@/layouts/Base.astro'
+import { Consola, VISTAS, type Vista } from '@/componentes/Consola'
+import { base } from '@/lib/base'
+import { leerInstantanea } from '@/lib/sse'
+import { leerPreferencias } from '@vmstats/db'
+
+/**
+ * Dashboard.
+ *
+ * La instantánea se lee en el servidor y se pasa como prop inicial. Sin esto,
+ * la consola se dibuja vacía y se llena recién cuando engancha el SSE: medio
+ * segundo de esqueletos en cada carga, por un dato que el servidor ya tiene a
+ * mano.
+ *
+ * A partir de ahí manda el stream. Ver `hooks/useFlujo.ts`.
+ */
+
+const sesion = Astro.locals.sesion
+// El middleware ya redirige sin sesión; esto es la red de contención para que
+// el tipo no sea nullable más abajo.
+if (sesion === null) return Astro.redirect('/login', 302)
+
+/* La vista se resuelve en el servidor.
+ *
+ * Si el hook la leyera recién en el cliente, un enlace a
+ * `?view=containers` renderizaría Resumen en el HTML y Contenedores al
+ * hidratar: dos árboles distintos, y React descarta el trabajo del servidor. */
+const pedida = Astro.url.searchParams.get('view')
+const vistaInicial: Vista = VISTAS.includes(pedida as Vista) ? (pedida as Vista) : 'overview'
+
+let instantaneaInicial = null
+let zonaHoraria = 'America/Miquelon'
+
+try {
+  const [foto, preferencias] = await Promise.all([
+    leerInstantanea(),
+    leerPreferencias(base()),
+  ])
+  instantaneaInicial = foto
+  zonaHoraria = preferencias.zonaHoraria
+} catch (causa) {
+  // La base caída no puede impedir que la consola cargue: el cliente reintenta
+  // por SSE y el banner de estado lo explica.
+  console.error('[dashboard] no se pudo leer el estado inicial:', causa)
+}
+---
+
+<Base titulo="vmstats · Estado de la infraestructura">
+  {/*
+    `client:load` y no `client:visible`: la consola es la página entera y su
+    estado en vivo tiene que empezar a llegar de inmediato.
+  */}
+  <Consola
+    client:load
+    email={sesion.email}
+    zonaHoraria={zonaHoraria}
+    instantaneaInicial={instantaneaInicial}
+    csrf={Astro.locals.csrf}
+    vistaInicial={vistaInicial}
+  />
+</Base>

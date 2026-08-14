@@ -1,0 +1,23 @@
+# El contexto de build es la raíz del monorepo, así que conviene que sea chico.
+node_modules
+**/node_modules
+**/dist
+**/.astro
+**/*.tsbuildinfo
+
+.git
+.github
+capturas
+docs
+e2e
+tests
+test-results
+playwright-report
+coverage
+
+.env
+.env.*
+!.env.example
+
+*.log
+README.md

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Una línea de pulso: el mismo gesto que el elemento distintivo de la consola. -->
+  <rect width="32" height="32" rx="7" fill="#24457E"/>
+  <path
+    d="M4 21 L9 21 L11.5 12 L14.5 25 L17.5 9 L20.5 18 L23 21 L28 21"
+    fill="none"
+    stroke="#ffffff"
+    stroke-width="2.2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>

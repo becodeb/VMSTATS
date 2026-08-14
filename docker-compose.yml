@@ -1,0 +1,179 @@
+# =============================================================================
+# vmstats — despliegue completo.
+#
+# Cuatro servicios. La frontera de seguridad más importante del archivo:
+#
+#   - El socket de Docker lo ve UNICAMENTE `socket-proxy`.
+#   - `collector` habla con el proxy por HTTP, sólo GET.
+#   - `web` no tiene ninguna forma de llegar a Docker.
+#
+# Nada de esto depende de que el código se porte bien: el proxy rechaza los
+# métodos de escritura, y `web` ni siquiera está en la red del proxy.
+#
+# Montar `/var/run/docker.sock` en el proxy es una operación privilegiada: quien
+# pueda escribir en ese socket controla la máquina entera. Por eso el proxy es
+# el único que lo toca, con todo prohibido salvo lo que hace falta leer.
+# Ver docs/security.md.
+# =============================================================================
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-vmstats}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?definí POSTGRES_PASSWORD en .env}
+      POSTGRES_DB: ${POSTGRES_DB:-vmstats}
+      # `trust` jamás: la base está en la misma red que el resto.
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    volumes:
+      - postgres-datos:/var/lib/postgresql/data
+    networks:
+      - interna
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-vmstats} -d ${POSTGRES_DB:-vmstats}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    # El puerto NO se publica. La base sólo es alcanzable desde la red interna;
+    # para un backup se usa `docker compose exec`. Ver docs/operations.md.
+
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.3.0
+    restart: unless-stopped
+    environment:
+      # Sólo lectura, y sólo de lo que el collector necesita.
+      CONTAINERS: 1
+      INFO: 1
+      VERSION: 1
+      PING: 1
+      # Todo lo demás, prohibido. `POST: 0` es lo que impide crear, borrar,
+      # reiniciar o ejecutar cualquier cosa, incluso si el collector lo
+      # intentara.
+      POST: 0
+      BUILD: 0
+      COMMIT: 0
+      CONFIGS: 0
+      DISTRIBUTION: 0
+      EXEC: 0
+      IMAGES: 0
+      NETWORKS: 0
+      NODES: 0
+      PLUGINS: 0
+      SECRETS: 0
+      SERVICES: 0
+      SESSION: 0
+      SWARM: 0
+      SYSTEM: 0
+      TASKS: 0
+      VOLUMES: 0
+    volumes:
+      # Sólo lectura, y sólo acá.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - docker-interna
+    security_opt:
+      - no-new-privileges:true
+    # `web` no está en esta red: no puede llegar al proxy ni por accidente.
+
+  collector:
+    build:
+      context: .
+      dockerfile: apps/collector/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-vmstats}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vmstats}
+
+      # Identidad estable del host. Ver .env.example.
+      VMSTATS_HOST_ID: ${VMSTATS_HOST_ID:-}
+
+      # Raíces del host. Sin esto el collector mediría su propio contenedor.
+      HOST_PROC: /host/proc
+      HOST_SYS: /host/sys
+      HOST_ROOTFS: /host/root
+
+      # Docker vía proxy, nunca por socket directo.
+      DOCKER_PROXY_HOST: socket-proxy
+      DOCKER_PROXY_PUERTO: 2375
+
+      COOLIFY_BASE_URL: ${COOLIFY_BASE_URL:-}
+      COOLIFY_API_TOKEN: ${COOLIFY_API_TOKEN:-}
+
+      COLLECTOR_TOKEN_INTERNO: ${COLLECTOR_TOKEN_INTERNO:-}
+      COLLECTOR_PUERTO_INTERNO: 8787
+
+      COLLECTOR_INTERVALO_MUESTRA_MS: ${COLLECTOR_INTERVALO_MUESTRA_MS:-5000}
+      COLLECTOR_INTERVALO_PERSISTENCIA_MS: ${COLLECTOR_INTERVALO_PERSISTENCIA_MS:-10000}
+    volumes:
+      # Sólo lectura. El collector no escribe nada en el host.
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro
+    networks:
+      - interna
+      - docker-interna
+    # El puerto 8787 NO se publica: sólo existe dentro de `interna`, para que
+    # `web` pueda pedir logs. Desde afuera de la VM no es alcanzable.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      # El archivo de vida del healthcheck. Es lo único que el collector
+      # escribe fuera de PostgreSQL.
+      - /tmp:size=8m,mode=1777
+    # `privileged: true` no hace falta y no se usa: leer /proc y /sys montados
+    # como sólo lectura alcanza para todo lo que mide vmstats.
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-vmstats}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vmstats}
+      SESSION_SECRET: ${SESSION_SECRET:?definí SESSION_SECRET en .env}
+      NODE_ENV: production
+      PORT: 4321
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-}
+
+      # Para pedirle los logs al collector. Sin esto la función queda apagada
+      # y la UI lo explica.
+      COLLECTOR_URL_INTERNA: http://collector:8787
+      COLLECTOR_TOKEN_INTERNO: ${COLLECTOR_TOKEN_INTERNO:-}
+    ports:
+      - '${VMSTATS_PUERTO:-4321}:4321'
+    networks:
+      - interna
+    # Sin `docker-interna`: web no tiene ruta hacia el socket de Docker.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      # El adaptador de Node guarda las sesiones de Astro en disco.
+      - /tmp:size=16m
+
+networks:
+  interna:
+    driver: bridge
+  docker-interna:
+    driver: bridge
+    # Sin salida a Internet: esta red sólo une al collector con el proxy.
+    internal: true
+
+volumes:
+  postgres-datos:
+    driver: local

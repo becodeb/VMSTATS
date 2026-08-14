@@ -1,0 +1,9 @@
+---
+/**
+ * Raíz.
+ *
+ * vmstats no tiene landing: es una consola interna y la raíz es sólo el camino
+ * al dashboard. Sin sesión, el middleware ya mandó al login antes de llegar acá.
+ */
+return Astro.redirect('/dashboard', 302)
+---

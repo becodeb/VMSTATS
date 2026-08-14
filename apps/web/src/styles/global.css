@@ -1,0 +1,651 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import '@fontsource-variable/geist';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --font-heading: var(--font-sans);
+    --font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+    --font-mono: ui-monospace, 'SFMono-Regular', 'Menlo', monospace;
+
+    --color-ring: var(--ring);
+    --color-input: var(--input);
+    --color-border: var(--border);
+    --color-destructive: var(--destructive);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --color-foreground: var(--foreground);
+    --color-background: var(--background);
+
+    /* Estados. El color acá comunica, no decora: sólo lo usan los indicadores
+     * de salud, y siempre acompañado de texto o de un ícono. */
+    --color-sano: var(--sano);
+    --color-sano-suave: var(--sano-suave);
+    --color-aviso: var(--aviso);
+    --color-aviso-suave: var(--aviso-suave);
+    --color-critico: var(--critico);
+    --color-critico-suave: var(--critico-suave);
+    --color-neutro: var(--neutro);
+    --color-neutro-suave: var(--neutro-suave);
+
+    --color-chart-1: var(--chart-1);
+    --color-chart-2: var(--chart-2);
+    --color-chart-3: var(--chart-3);
+    --color-chart-4: var(--chart-4);
+    --color-chart-5: var(--chart-5);
+
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) * 1.4);
+    --radius-2xl: calc(var(--radius) * 1.8);
+}
+
+:root {
+    /* --- Marca -----------------------------------------------------------
+     * Los tokens neutros y el azul #24457E vienen de Panky sin cambios: es el
+     * mismo sistema visual, sólo que aplicado a telemetría en vez de notas. */
+    --background: oklch(0.976 0.002 264);
+    --foreground: oklch(0.205 0.012 264);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.205 0.012 264);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.205 0.012 264);
+    --primary: #24457E;
+    --primary-foreground: oklch(0.99 0 0);
+    --secondary: oklch(0.955 0.004 264);
+    --secondary-foreground: oklch(0.28 0.03 264);
+    --muted: oklch(0.955 0.004 264);
+    --muted-foreground: oklch(0.505 0.014 264);
+    --accent: oklch(0.945 0.012 258);
+    --accent-foreground: #24457E;
+    --destructive: oklch(0.55 0.2 27);
+    --border: oklch(0.905 0.005 264);
+    --input: oklch(0.905 0.005 264);
+    --ring: #24457E;
+
+    /* --- Estados ---------------------------------------------------------
+     * Verde sobrio, no verde de semáforo: en una consola que está sana el 99 %
+     * del tiempo, un verde saturado grita todo el día y deja de significar
+     * algo. Los tres colores pasan 4.5:1 contra `card`. */
+    --sano: oklch(0.52 0.12 150);
+    --sano-suave: oklch(0.955 0.03 150);
+    --aviso: oklch(0.56 0.13 70);
+    --aviso-suave: oklch(0.96 0.04 80);
+    --critico: oklch(0.53 0.20 27);
+    --critico-suave: oklch(0.958 0.03 25);
+    --neutro: oklch(0.505 0.014 264);
+    --neutro-suave: oklch(0.955 0.004 264);
+
+    /* Series de gráfico, heredadas de Panky: ya están validadas en claro y
+     * oscuro con los mismos valores. */
+    --chart-1: #3D74BC;
+    --chart-2: #2E8B3A;
+    --chart-3: #9757CE;
+    --chart-4: #C06A0A;
+    --chart-5: #24457E;
+
+    --radius: 0.625rem;
+}
+
+.dark {
+    --background: oklch(0.165 0.012 264);
+    --foreground: oklch(0.955 0.004 264);
+    --card: oklch(0.205 0.014 264);
+    --card-foreground: oklch(0.955 0.004 264);
+    --popover: oklch(0.225 0.014 264);
+    --popover-foreground: oklch(0.955 0.004 264);
+    /* #24457E sobre fondo oscuro no llega al contraste mínimo; #7BA4E3 da 7.3:1. */
+    --primary: #7BA4E3;
+    --primary-foreground: oklch(0.18 0.02 264);
+    --secondary: oklch(0.265 0.016 264);
+    --secondary-foreground: oklch(0.955 0.004 264);
+    --muted: oklch(0.265 0.016 264);
+    --muted-foreground: oklch(0.715 0.012 264);
+    --accent: oklch(0.295 0.03 258);
+    --accent-foreground: oklch(0.955 0.004 264);
+    --destructive: oklch(0.68 0.19 25);
+    --border: oklch(1 0 0 / 12%);
+    --input: oklch(1 0 0 / 16%);
+    --ring: #7BA4E3;
+
+    /* Los estados se aclaran para el fondo oscuro manteniendo el hue: en
+     * oscuro el color de texto tiene que ser el claro, no el saturado. */
+    --sano: oklch(0.76 0.15 150);
+    --sano-suave: oklch(0.28 0.05 150);
+    --aviso: oklch(0.80 0.13 75);
+    --aviso-suave: oklch(0.30 0.05 70);
+    --critico: oklch(0.72 0.17 25);
+    --critico-suave: oklch(0.30 0.07 25);
+    --neutro: oklch(0.715 0.012 264);
+    --neutro-suave: oklch(0.265 0.016 264);
+
+    --chart-1: #5589D6;
+    --chart-2: #42A050;
+    --chart-3: #A26FD8;
+    --chart-4: #C87D22;
+    --chart-5: #7BA4E3;
+}
+
+@layer base {
+    * {
+        @apply border-border outline-ring/50;
+    }
+
+    body {
+        @apply bg-background text-foreground;
+        /* Cifras de ancho fijo en toda la app. En una consola de telemetría los
+         * números cambian cada segundo: sin `tnum` las columnas bailan y el ojo
+         * no puede comparar dos filas de un vistazo. */
+        font-variant-numeric: tabular-nums;
+    }
+
+    html {
+        @apply font-sans;
+        /* El scroll no puede saltar cuando aparece un panel lateral. */
+        scrollbar-gutter: stable;
+    }
+
+    /* ======================================================================
+     * REGLA DURA: la página nunca scrollea horizontalmente.
+     *
+     * `clip` recorta el desborde sin crear un contenedor de scroll, así que
+     * `position: sticky` del header sigue funcionando — con `hidden` no.
+     * ==================================================================== */
+    html,
+    body {
+        overflow-x: clip;
+        max-width: 100%;
+    }
+
+    img,
+    video,
+    canvas,
+    svg,
+    table,
+    pre {
+        max-width: 100%;
+    }
+
+    /* Nombres de contenedor, imágenes con sha y rutas de montaje son largos y
+     * sin espacios: rompen antes de desbordar. */
+    p, h1, h2, h3, h4, td, th, dd, dt {
+        overflow-wrap: break-word;
+    }
+
+    /* El foco tiene que verse siempre, no sólo con teclado en algunos navegadores. */
+    :focus-visible {
+        @apply outline-ring outline-2 outline-offset-2;
+    }
+}
+
+@layer components {
+    /* Números de métrica: siempre tabulares y sin ligaduras. */
+    .cifra {
+        font-variant-numeric: tabular-nums;
+        font-feature-settings: 'tnum' 1, 'calt' 0;
+        letter-spacing: -0.01em;
+    }
+
+    /* Divisor fino. La consola separa bloques con líneas, no con sombras. */
+    .divisor {
+        @apply border-border border-t;
+    }
+
+    /* Sólo para lectores de pantalla. */
+    .solo-lectores {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+        border-width: 0;
+    }
+
+    .solo-lectores-al-enfocar:focus {
+        position: static;
+        width: auto;
+        height: auto;
+        margin: 0;
+        overflow: visible;
+        clip-path: none;
+        white-space: normal;
+    }
+}
+
+/* ============================================================================
+ * Transiciones adaptadas de transitions.dev
+ *
+ * Se conservan las duraciones y curvas originales; lo único que cambia son los
+ * colores, que ahora salen de los tokens del tema en vez de estar fijos, para
+ * que funcionen igual en claro y en oscuro.
+ *
+ * Están sólo las ocho que comunican un cambio de estado. Ninguna es decorativa
+ * y todas se apagan con `prefers-reduced-motion`.
+ * ========================================================================== */
+
+:root {
+    /* skeleton-reveal — carga inicial */
+    --pulse-dur: 1000ms;
+    --pulse-count: 1;
+    --pulse-min: 0.5;
+    --reveal-dur: 400ms;
+    --reveal-blur: 2px;
+    --reveal-ease: ease-in-out;
+
+    /* number-pop-in — cambios relevantes de valor */
+    --digit-dur: 500ms;
+    --digit-distance: 8px;
+    --digit-stagger: 70ms;
+    --digit-blur: 2px;
+    --digit-ease: cubic-bezier(0.34, 1.45, 0.64, 1);
+    --digit-dir-x: 0;
+    --digit-dir-y: 1;
+
+    /* tabs-sliding — selector de rango temporal */
+    --tabs-dur: 250ms;
+    --tabs-ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+    /* panel-reveal — inspector lateral */
+    --panel-open-dur: 400ms;
+    --panel-close-dur: 350ms;
+    --panel-translate-y: 100px;
+    --panel-blur: 2px;
+    --panel-ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+    /* menu-dropdown — filtros */
+    --dropdown-open-dur: 250ms;
+    --dropdown-close-dur: 150ms;
+    --dropdown-pre-scale: 0.97;
+    --dropdown-closing-scale: 0.99;
+    --dropdown-ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+    /* toast — confirmaciones y errores */
+    --toast-open: 350ms;
+    --toast-close: 250ms;
+    --toast-distance: 16px;
+    --toast-blur: 2px;
+    --toast-scale: 0.97;
+    --toast-ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+    /* tooltip — explicación de métricas */
+    --tt-in-dur: 150ms;
+    --tt-out-dur: 50ms;
+    --tt-scale: 0.98;
+    --tt-delay: 80ms;
+    --tt-in-ease: ease-out;
+    --tt-out-ease: ease-out;
+
+    /* notification-badge — alertas nuevas */
+    --badge-slide-dur: 260ms;
+    --badge-pop-dur: 500ms;
+    --badge-pop-close-dur: 180ms;
+    --badge-fade-dur: 400ms;
+    --badge-fade-close-dur: 180ms;
+    --badge-blur: 2px;
+    --badge-offset-x: -8.2px;
+    --badge-offset-y: 12.4px;
+    --badge-slide-ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --badge-pop-ease: cubic-bezier(0.34, 1.36, 0.64, 1);
+    --badge-close-ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* --- skeleton-reveal ----------------------------------------------------- */
+
+@keyframes t-skel-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: var(--pulse-min); }
+}
+
+.t-skel { position: relative; }
+
+.t-skel-skeleton {
+    z-index: 1;
+    opacity: 1;
+    filter: blur(0);
+    transition:
+        opacity var(--reveal-dur) var(--reveal-ease),
+        filter var(--reveal-dur) var(--reveal-ease);
+}
+
+.t-skel-skeleton.is-pulsing {
+    animation: t-skel-pulse var(--pulse-dur) var(--reveal-ease) var(--pulse-count);
+}
+
+.t-skel-content {
+    opacity: 0;
+    filter: blur(var(--reveal-blur));
+    transition:
+        opacity var(--reveal-dur) var(--reveal-ease),
+        filter var(--reveal-dur) var(--reveal-ease);
+}
+
+.t-skel.is-revealed .t-skel-skeleton {
+    opacity: 0;
+    filter: blur(var(--reveal-blur));
+    pointer-events: none;
+}
+
+.t-skel.is-revealed .t-skel-content {
+    opacity: 1;
+    filter: blur(0);
+}
+
+.t-skel.is-resetting .t-skel-skeleton,
+.t-skel.is-resetting .t-skel-content {
+    transition: none;
+}
+
+/* --- number-pop-in ------------------------------------------------------- */
+
+@keyframes t-digit-pop-in {
+    0% {
+        transform: translate(
+            calc(var(--digit-distance) * var(--digit-dir-x)),
+            calc(var(--digit-distance) * var(--digit-dir-y))
+        );
+        opacity: 0;
+        filter: blur(var(--digit-blur));
+    }
+    100% { transform: translate(0, 0); opacity: 1; filter: blur(0); }
+}
+
+.t-digit-group {
+    display: inline-flex;
+    align-items: baseline;
+}
+
+.t-digit {
+    display: inline-block;
+    will-change: transform, opacity, filter;
+}
+
+.t-digit-group.is-animating .t-digit {
+    animation: t-digit-pop-in var(--digit-dur) var(--digit-ease) both;
+}
+
+.t-digit-group.is-animating .t-digit[data-stagger='1'] {
+    animation-delay: var(--digit-stagger);
+}
+
+.t-digit-group.is-animating .t-digit[data-stagger='2'] {
+    animation-delay: calc(var(--digit-stagger) * 2);
+}
+
+/* --- tabs-sliding -------------------------------------------------------- */
+
+.t-tabs {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 3px;
+    border-radius: 48px;
+    background: var(--muted);
+}
+
+.t-tab {
+    position: relative;
+    appearance: none;
+    border: 0;
+    background: transparent;
+    height: 30px;
+    padding: 4px 12px;
+    color: var(--muted-foreground);
+    cursor: pointer;
+    border-radius: 48px;
+    z-index: 1;
+    transition: color var(--tabs-dur) var(--tabs-ease);
+}
+
+.t-tab:not([aria-selected='true']):hover,
+.t-tab[aria-selected='true'] {
+    color: var(--foreground);
+}
+
+.t-tabs-pill {
+    position: absolute;
+    top: 3px;
+    left: 0;
+    height: 30px;
+    width: 0;
+    background: var(--card);
+    border-radius: 48px;
+    transform: translateX(0);
+    transition:
+        transform var(--tabs-dur) var(--tabs-ease),
+        width var(--tabs-dur) var(--tabs-ease);
+}
+
+/* --- panel-reveal -------------------------------------------------------- */
+
+.t-panel-slide {
+    transform: translateY(var(--panel-translate-y));
+    opacity: 0;
+    filter: blur(var(--panel-blur));
+    pointer-events: none;
+    transition:
+        transform var(--panel-close-dur) var(--panel-ease),
+        opacity var(--panel-close-dur) var(--panel-ease),
+        filter var(--panel-close-dur) var(--panel-ease);
+    will-change: transform, opacity, filter;
+}
+
+.t-panel-slide[data-open='true'] {
+    transform: translateY(0);
+    opacity: 1;
+    filter: blur(0);
+    pointer-events: auto;
+    transition:
+        transform var(--panel-open-dur) var(--panel-ease),
+        opacity var(--panel-open-dur) var(--panel-ease),
+        filter var(--panel-open-dur) var(--panel-ease);
+}
+
+/* En pantallas anchas el inspector entra desde el costado, no desde abajo:
+ * el movimiento apunta hacia donde el panel efectivamente está. */
+@media (min-width: 1024px) {
+    .t-panel-slide {
+        transform: translateX(var(--panel-translate-y));
+    }
+    .t-panel-slide[data-open='true'] {
+        transform: translateX(0);
+    }
+}
+
+/* --- menu-dropdown ------------------------------------------------------- */
+
+.t-dropdown {
+    transform-origin: top left;
+    transform: scale(var(--dropdown-pre-scale));
+    opacity: 0;
+    pointer-events: none;
+    transition:
+        transform var(--dropdown-open-dur) var(--dropdown-ease),
+        opacity var(--dropdown-open-dur) var(--dropdown-ease);
+    will-change: transform, opacity;
+}
+
+.t-dropdown[data-origin='top-right'] { transform-origin: top right; }
+.t-dropdown[data-origin='top-center'] { transform-origin: top center; }
+
+.t-dropdown.is-open {
+    transform: scale(1);
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.t-dropdown.is-closing {
+    transform: scale(var(--dropdown-closing-scale));
+    opacity: 0;
+    pointer-events: none;
+    transition:
+        transform var(--dropdown-close-dur) var(--dropdown-ease),
+        opacity var(--dropdown-close-dur) var(--dropdown-ease);
+}
+
+/* --- toast --------------------------------------------------------------- */
+
+.t-toast {
+    opacity: 0;
+    transform: translateY(var(--toast-distance)) scale(var(--toast-scale));
+    filter: blur(var(--toast-blur));
+    will-change: transform, opacity, filter;
+    transition:
+        opacity var(--toast-close) var(--toast-ease),
+        transform var(--toast-close) var(--toast-ease),
+        filter var(--toast-close) var(--toast-ease);
+}
+
+.t-toast.is-open {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+    transition:
+        opacity var(--toast-open) var(--toast-ease),
+        transform var(--toast-open) var(--toast-ease),
+        filter var(--toast-open) var(--toast-ease);
+}
+
+/* --- tooltip ------------------------------------------------------------- */
+
+.t-tt-wrap {
+    position: relative;
+    display: inline-block;
+}
+
+.t-tt {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    transform: translate(-50%, 0) scale(var(--tt-scale));
+    transform-origin: 50% 100%;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: var(--popover);
+    color: var(--popover-foreground);
+    border: 1px solid var(--border);
+    max-width: min(18rem, 80vw);
+    z-index: 50;
+    opacity: 0;
+    pointer-events: none;
+    transition:
+        opacity var(--tt-out-dur) var(--tt-out-ease),
+        transform var(--tt-out-dur) var(--tt-out-ease);
+}
+
+/* El tooltip también aparece con foco de teclado, no sólo con hover: si
+ * explica qué significa una métrica, tiene que ser alcanzable sin mouse. */
+.t-tt-wrap:hover .t-tt,
+.t-tt-trigger:focus-visible + .t-tt {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+    transition-duration: var(--tt-in-dur);
+    transition-timing-function: var(--tt-in-ease);
+    transition-delay: var(--tt-delay);
+}
+
+/* --- Barra indeterminada -------------------------------------------------
+ *
+ * Para el despliegue en curso. No es de transitions.dev: es la forma estándar
+ * de decir «esto avanza» cuando no se sabe cuánto falta. Coolify no publica
+ * progreso, así que una barra con porcentaje sería inventada.
+ * ---------------------------------------------------------------------- */
+
+@keyframes indeterminado {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(300%); }
+}
+
+/* --- notification-badge -------------------------------------------------- */
+
+@keyframes t-badge-slide-in {
+    from { transform: translate(var(--badge-offset-x), var(--badge-offset-y)); }
+    to { transform: translate(0, 0); }
+}
+
+.t-badge {
+    position: absolute;
+    top: -6px;
+    right: -8px;
+    pointer-events: none;
+    will-change: transform;
+}
+
+.t-badge[data-open='true'] {
+    animation: t-badge-slide-in var(--badge-slide-dur) var(--badge-slide-ease);
+}
+
+.t-badge-dot {
+    display: block;
+    transform-origin: center;
+    transform: scale(1);
+    opacity: 1;
+    filter: blur(0);
+    transition:
+        transform var(--badge-pop-dur) var(--badge-pop-ease),
+        opacity var(--badge-fade-dur) var(--badge-pop-ease),
+        filter var(--badge-pop-dur) var(--badge-pop-ease);
+    will-change: transform, opacity, filter;
+}
+
+.t-badge[data-open='false'] .t-badge-dot {
+    transform: scale(0);
+    opacity: 0;
+    filter: blur(var(--badge-blur));
+    transition:
+        transform var(--badge-pop-close-dur) var(--badge-close-ease),
+        opacity var(--badge-fade-close-dur) var(--badge-close-ease),
+        filter var(--badge-pop-close-dur) var(--badge-close-ease);
+}
+
+/* ============================================================================
+ * `prefers-reduced-motion`
+ *
+ * Un solo bloque para todas: cada transición se apaga entera, no se acorta.
+ * Los estados finales ya están definidos arriba, así que sin animación la UI
+ * queda igual, sólo que llega de golpe.
+ * ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+    .t-skel-skeleton,
+    .t-skel-content,
+    .t-tab,
+    .t-tabs-pill,
+    .t-panel-slide,
+    .t-panel-slide[data-open='true'],
+    .t-dropdown,
+    .t-dropdown.is-closing,
+    .t-toast,
+    .t-toast.is-open,
+    .t-tt,
+    .t-badge-dot,
+    .t-badge[data-open='false'] .t-badge-dot {
+        transition: none !important;
+    }
+
+    .t-skel-skeleton.is-pulsing,
+    .t-digit-group.is-animating .t-digit,
+    .t-badge[data-open='true'] {
+        animation: none !important;
+    }
+
+    *,
+    *::before,
+    *::after {
+        scroll-behavior: auto !important;
+    }
+}

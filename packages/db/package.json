@@ -1,0 +1,38 @@
+{
+  "name": "@vmstats/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./schema": {
+      "types": "./dist/schema.d.ts",
+      "import": "./dist/schema.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
+    "generate": "drizzle-kit generate",
+    "migrate": "node dist/migrate.js",
+    "studio": "drizzle-kit studio",
+    "bootstrap:admin": "node dist/bootstrap.js",
+    "clave": "node dist/clave.js",
+    "migrate:dev": "tsx src/migrate.ts"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.2",
+    "pg": "^8.23.0",
+    "zod": "^4.4.3",
+    "@node-rs/argon2": "^2.1.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.15.6",
+    "drizzle-kit": "^0.31.10"
+  }
+}
