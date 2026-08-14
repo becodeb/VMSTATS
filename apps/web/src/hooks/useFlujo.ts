@@ -32,6 +32,19 @@ const INTERVALO_POLLING_MS = 15_000
 const BACKOFF_MAXIMO_MS = 30_000
 
 /**
+ * Cada cuánto se reintenta el SSE estando en polling.
+ *
+ * Sin esto el polling era un callejón sin salida: una vez que se caía ahí, la
+ * consola se quedaba sondeando cada 15 s hasta que alguien recargara la página.
+ * Un corte de red de diez segundos degradaba la sesión entera.
+ *
+ * Un minuto es el compromiso: lo bastante seguido como para volver al tiempo
+ * real enseguida, lo bastante espaciado como para no castigar a un servidor que
+ * está caído.
+ */
+const INTERVALO_REINTENTO_SSE_MS = 60_000
+
+/**
  * Cuánto silencio se tolera antes de dar el túnel por muerto.
  *
  * `EventSource` sólo emite `error` cuando el socket se cierra. Hay un modo de
@@ -69,6 +82,8 @@ export function useFlujo(instantaneaInicial: Instantanea | null): EstadoFlujo {
   const sondeo = useRef<ReturnType<typeof setInterval> | null>(null)
   /** Corta el túnel si deja de llegar cualquier cosa. Ver UMBRAL_SILENCIO_MS. */
   const vigilante = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** Reintento del SSE mientras se sondea. Ver INTERVALO_REINTENTO_SSE_MS. */
+  const reintento = useRef<ReturnType<typeof setTimeout> | null>(null)
   const ultimoId = useRef(0)
   const intentos = useRef(0)
   const desmontado = useRef(false)
@@ -93,6 +108,8 @@ export function useFlujo(instantaneaInicial: Instantanea | null): EstadoFlujo {
     sondeo.current = null
     if (vigilante.current !== null) clearTimeout(vigilante.current)
     vigilante.current = null
+    if (reintento.current !== null) clearTimeout(reintento.current)
+    reintento.current = null
   }, [])
 
   const sondear = useCallback(async () => {
@@ -110,6 +127,16 @@ export function useFlujo(instantaneaInicial: Instantanea | null): EstadoFlujo {
     setConexion('polling')
     void sondear()
     sondeo.current = setInterval(() => void sondear(), INTERVALO_POLLING_MS)
+
+    /* El polling no es un destino, es una sala de espera.
+     *
+     * Se vuelve a probar el SSE al minuto. `intentos` se reinicia para que el
+     * intento nuevo tenga su propio ciclo de backoff en vez de rendirse al
+     * primer error por venir de una tanda anterior ya agotada. */
+    reintento.current = setTimeout(() => {
+      intentos.current = 0
+      conectarRef.current()
+    }, INTERVALO_REINTENTO_SSE_MS)
   }, [sondear])
 
   const conectar = useCallback(() => {

@@ -248,41 +248,41 @@ test.describe('tiempo real', () => {
     await expect(page.getByText('En vivo')).toBeVisible({ timeout: 15_000 })
   })
 
-  test('el SSE reconecta solo cuando se corta la red', async ({ page, context }) => {
-    // Detectar el silencio son 50 s por diseño, más el backoff de la vuelta.
-    // No se puede acortar sin volver la detección susceptible a un latido
-    // perdido por un pico de carga.
-    test.setTimeout(180_000)
+  test('el SSE degrada y se recupera solo cuando no puede conectar', async ({ page }) => {
+    test.setTimeout(120_000)
 
-    /* Se corta la red del navegador, no una ruta.
+    /* Se bloquea la ruta del flujo, no «la red».
      *
-     * `page.route` sólo intercepta peticiones nuevas, y el stream ya está
-     * abierto: abortar la ruta no lo mata. `setOffline` sí tira la conexión
-     * viva, que es lo que pasa en la realidad — un túnel que se cae, un wifi
-     * que se corta.
+     * `context.setOffline(true)` parece lo natural y es engañoso: no cierra un
+     * stream HTTPS ya establecido contra un servidor remoto. Medido acá, con la
+     * red «cortada» seguían llegando instantáneas y latidos durante más de un
+     * minuto. La consola mostraba «En vivo» — y tenía razón, porque el túnel
+     * seguía vivo. En local sí lo cortaba, y por eso el test pasaba: estaba
+     * midiendo una particularidad de localhost, no el comportamiento real.
      *
-     * El backoff propio es 1s, 2s, 4s… y tras cuatro fallos pasa a polling; el
-     * test acepta cualquiera de los dos estados intermedios.
+     * Abortar la ruta sí es determinista para lo que hay que probar: que si el
+     * SSE no logra establecerse, la consola lo dice y cae a polling en vez de
+     * mentir, y que vuelve sola cuando se puede. El backoff es 1s, 2s, 4s… y
+     * tras cuatro fallos pasa a polling; se acepta cualquiera de los dos.
      *
-     * La espera es de 60 s y no de 20 porque cortar la red no siempre cierra el
-     * socket: contra un servidor remoto queda ABIERTO pero mudo, y ahí
-     * `EventSource` no emite `error`. Lo que lo detecta es la vigilancia del
-     * latido, que da por muerto el túnel tras 50 s de silencio —dos latidos y
-     * medio—. Ese caso es justamente el que este test existe para cubrir: sin
-     * la vigilancia, la consola se quedaba en «En vivo» con datos congelados. */
+     * (El otro modo de fallo —túnel abierto pero mudo— lo cubre la vigilancia
+     * del latido en `useFlujo`, que no se puede provocar desde acá sin apagar
+     * el servidor.) */
     await entrar(page)
     await expect(page.getByText('En vivo')).toBeVisible({ timeout: 15_000 })
 
-    await context.setOffline(true)
+    await page.route('**/api/flujo*', (ruta) => ruta.abort())
+    await page.reload()
 
     await expect(page.getByText(/Reconectando|Actualizando cada/)).toBeVisible({
-      timeout: 60_000,
+      timeout: 45_000,
     })
 
-    await context.setOffline(false)
+    await page.unroute('**/api/flujo*')
 
-    // Y vuelve solo, sin recargar la página.
-    await expect(page.getByText('En vivo')).toBeVisible({ timeout: 45_000 })
+    // Y vuelve solo, sin recargar: el polling sigue corriendo y el SSE
+    // reengancha en el siguiente intento.
+    await expect(page.getByText('En vivo')).toBeVisible({ timeout: 60_000 })
   })
 })
 
