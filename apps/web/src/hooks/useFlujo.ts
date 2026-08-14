@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  INTERVALO_LATIDO_MS,
   esquemaInstantanea,
   datosDesactualizados,
   type Instantanea,
@@ -30,6 +31,23 @@ const INTENTOS_ANTES_DE_POLLING = 4
 const INTERVALO_POLLING_MS = 15_000
 const BACKOFF_MAXIMO_MS = 30_000
 
+/**
+ * Cuánto silencio se tolera antes de dar el túnel por muerto.
+ *
+ * `EventSource` sólo emite `error` cuando el socket se cierra. Hay un modo de
+ * fallo más común que ése y que no lo dispara: la conexión queda ABIERTA pero
+ * muda —la red se cae a mitad del stream, el portátil suspende, el móvil cambia
+ * de celda, un proxy retiene el socket—. Sin vigilancia propia, la consola se
+ * queda mostrando «En vivo» con datos congelados por tiempo indefinido.
+ *
+ * Apareció probando la reconexión contra el servidor real: al cortar la red del
+ * navegador, el estado nunca pasaba a «Reconectando».
+ *
+ * Dos latidos y medio: uno perdido puede ser un pico de carga, dos seguidos ya
+ * no.
+ */
+const UMBRAL_SILENCIO_MS = INTERVALO_LATIDO_MS * 2.5
+
 export interface EstadoFlujo {
   instantanea: Instantanea | null
   conexion: EstadoConexion
@@ -49,9 +67,12 @@ export function useFlujo(instantaneaInicial: Instantanea | null): EstadoFlujo {
   const fuente = useRef<EventSource | null>(null)
   const temporizador = useRef<ReturnType<typeof setTimeout> | null>(null)
   const sondeo = useRef<ReturnType<typeof setInterval> | null>(null)
+  /** Corta el túnel si deja de llegar cualquier cosa. Ver UMBRAL_SILENCIO_MS. */
+  const vigilante = useRef<ReturnType<typeof setTimeout> | null>(null)
   const ultimoId = useRef(0)
   const intentos = useRef(0)
   const desmontado = useRef(false)
+  const conectarRef = useRef<() => void>(() => {})
 
   const aplicar = useCallback((datos: unknown) => {
     const validada = esquemaInstantanea.safeParse(datos)
@@ -70,6 +91,8 @@ export function useFlujo(instantaneaInicial: Instantanea | null): EstadoFlujo {
     temporizador.current = null
     if (sondeo.current !== null) clearInterval(sondeo.current)
     sondeo.current = null
+    if (vigilante.current !== null) clearTimeout(vigilante.current)
+    vigilante.current = null
   }, [])
 
   const sondear = useCallback(async () => {
@@ -99,12 +122,44 @@ export function useFlujo(instantaneaInicial: Instantanea | null): EstadoFlujo {
     const es = new EventSource(url)
     fuente.current = es
 
+    /* Única ruta de caída, para el error explícito y para el silencio.
+     *
+     * `es` queda capturado por cierre, así que si mientras tanto se abrió otra
+     * conexión, la comprobación de identidad evita que un temporizador viejo
+     * tire la nueva. */
+    const caer = () => {
+      if (fuente.current !== es) return
+      es.close()
+      fuente.current = null
+      if (vigilante.current !== null) clearTimeout(vigilante.current)
+      vigilante.current = null
+      if (desmontado.current) return
+
+      intentos.current += 1
+      if (intentos.current >= INTENTOS_ANTES_DE_POLLING) {
+        iniciarPolling()
+        return
+      }
+
+      setConexion('reconectando')
+      const espera = Math.min(BACKOFF_MAXIMO_MS, 1000 * 2 ** (intentos.current - 1))
+      temporizador.current = setTimeout(conectarRef.current, espera)
+    }
+
+    /** Rearma la cuenta atrás. Se llama con cada cosa que llegue por el túnel. */
+    const hayVida = () => {
+      if (vigilante.current !== null) clearTimeout(vigilante.current)
+      vigilante.current = setTimeout(caer, UMBRAL_SILENCIO_MS)
+    }
+
     es.addEventListener('open', () => {
       intentos.current = 0
       setConexion('conectado')
+      hayVida()
     })
 
     const alRecibir = (evento: MessageEvent<string>) => {
+      hayVida()
       const id = Number.parseInt(evento.lastEventId, 10)
       if (Number.isFinite(id)) ultimoId.current = id
       try {
@@ -117,24 +172,20 @@ export function useFlujo(instantaneaInicial: Instantanea | null): EstadoFlujo {
     es.addEventListener('instantanea', alRecibir as EventListener)
 
     // El latido no trae datos: sólo confirma que el túnel sigue vivo.
-    es.addEventListener('latido', () => setRecibidoEn(new Date()))
-
-    es.addEventListener('error', () => {
-      es.close()
-      fuente.current = null
-      if (desmontado.current) return
-
-      intentos.current += 1
-      if (intentos.current >= INTENTOS_ANTES_DE_POLLING) {
-        iniciarPolling()
-        return
-      }
-
-      setConexion('reconectando')
-      const espera = Math.min(BACKOFF_MAXIMO_MS, 1000 * 2 ** (intentos.current - 1))
-      temporizador.current = setTimeout(conectar, espera)
+    es.addEventListener('latido', () => {
+      hayVida()
+      setRecibidoEn(new Date())
     })
+
+    es.addEventListener('error', caer)
   }, [aplicar, iniciarPolling, limpiar])
+
+  /* `caer` necesita volver a llamar a `conectar`, y `conectar` crea a `caer`.
+   * La referencia rompe el ciclo sin que ninguna de las dos se recree en cada
+   * render, que es lo que reabriría la conexión sola. */
+  useEffect(() => {
+    conectarRef.current = conectar
+  }, [conectar])
 
   useEffect(() => {
     desmontado.current = false

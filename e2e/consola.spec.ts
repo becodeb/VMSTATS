@@ -249,6 +249,11 @@ test.describe('tiempo real', () => {
   })
 
   test('el SSE reconecta solo cuando se corta la red', async ({ page, context }) => {
+    // Detectar el silencio son 50 s por diseño, más el backoff de la vuelta.
+    // No se puede acortar sin volver la detección susceptible a un latido
+    // perdido por un pico de carga.
+    test.setTimeout(180_000)
+
     /* Se corta la red del navegador, no una ruta.
      *
      * `page.route` sólo intercepta peticiones nuevas, y el stream ya está
@@ -257,14 +262,21 @@ test.describe('tiempo real', () => {
      * que se corta.
      *
      * El backoff propio es 1s, 2s, 4s… y tras cuatro fallos pasa a polling; el
-     * test acepta cualquiera de los dos estados intermedios. */
+     * test acepta cualquiera de los dos estados intermedios.
+     *
+     * La espera es de 60 s y no de 20 porque cortar la red no siempre cierra el
+     * socket: contra un servidor remoto queda ABIERTO pero mudo, y ahí
+     * `EventSource` no emite `error`. Lo que lo detecta es la vigilancia del
+     * latido, que da por muerto el túnel tras 50 s de silencio —dos latidos y
+     * medio—. Ese caso es justamente el que este test existe para cubrir: sin
+     * la vigilancia, la consola se quedaba en «En vivo» con datos congelados. */
     await entrar(page)
     await expect(page.getByText('En vivo')).toBeVisible({ timeout: 15_000 })
 
     await context.setOffline(true)
 
     await expect(page.getByText(/Reconectando|Actualizando cada/)).toBeVisible({
-      timeout: 20_000,
+      timeout: 60_000,
     })
 
     await context.setOffline(false)
