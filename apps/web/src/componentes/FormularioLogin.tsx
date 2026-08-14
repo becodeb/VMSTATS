@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { LoaderCircleIcon } from 'lucide-react'
 import { esquemaError } from '@vmstats/shared'
+import { useMontado } from '@/hooks/useMontado'
 import { Button } from '@/components/ui/button'
 import { Aviso, Campo, Rotulo } from '@/components/ui/varios'
 
@@ -10,6 +11,26 @@ import { Aviso, Campo, Rotulo } from '@/components/ui/varios'
  * El único error que se muestra es el que devuelve el servidor, que es siempre
  * el mismo para email inexistente y contraseña incorrecta. Acá no se hace
  * ninguna validación que pueda revelar más que eso.
+ *
+ * Sobre el envío antes de hidratar
+ * -------------------------------
+ * Este formulario se manda por `fetch`, pero entre que el servidor pinta el
+ * HTML y React engancha el `onSubmit` hay una ventana. Si alguien aprieta Enter
+ * ahí —o un test automatizado, que es como apareció— el navegador hace el
+ * submit nativo.
+ *
+ * Sin `method`, ese submit nativo es GET, y GET pone los campos en la query
+ * string: la contraseña terminaba en la barra de direcciones, en el historial,
+ * en los logs del proxy y en la cabecera `Referer` del siguiente pedido.
+ *
+ * Dos capas para que no vuelva a pasar:
+ *
+ *   1. `method="post"`. Aunque el submit nativo ocurra, los campos viajan en el
+ *      cuerpo. Nunca en una URL.
+ *   2. El botón queda deshabilitado hasta que el componente montó. Cerrar la
+ *      ventana es mejor que sobrevivirla.
+ *
+ * La primera es la que importa: es la que sigue protegiendo si la segunda falla.
  * ========================================================================== */
 
 interface Props {
@@ -20,6 +41,7 @@ interface Props {
 export function FormularioLogin({ siguiente }: Props) {
   const [enviando, setEnviando] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const montado = useMontado()
 
   async function enviar(evento: FormEvent<HTMLFormElement>): Promise<void> {
     evento.preventDefault()
@@ -58,7 +80,17 @@ export function FormularioLogin({ siguiente }: Props) {
   }
 
   return (
-    <form onSubmit={(e) => void enviar(e)} className="flex flex-col gap-4" noValidate>
+    <form
+      onSubmit={(e) => void enviar(e)}
+      /* `method` y `action` son la red de contención del submit nativo, no la
+       * vía normal: si React ya enganchó, `preventDefault` corre antes y esto
+       * no se usa nunca. Si no enganchó, los campos van en el cuerpo de un POST
+       * y la página vuelve a pintarse. */
+      method="post"
+      action="/login"
+      className="flex flex-col gap-4"
+      noValidate
+    >
       {error !== null && (
         // `assertive` porque es la respuesta directa a la acción del usuario y
         // tiene que interrumpir: sin esto, quien usa lector de pantalla
@@ -94,7 +126,12 @@ export function FormularioLogin({ siguiente }: Props) {
         />
       </div>
 
-      <Button type="submit" variante="primario" disabled={enviando} className="mt-2 w-full">
+      <Button
+        type="submit"
+        variante="primario"
+        disabled={enviando || !montado}
+        className="mt-2 w-full"
+      >
         {enviando ? (
           <>
             <LoaderCircleIcon className="animate-spin motion-reduce:animate-none" />

@@ -34,6 +34,34 @@ test.describe('acceso', () => {
     await expect(mensaje).toContainText('Email o contraseña incorrectos')
   })
 
+  test('las credenciales nunca aparecen en la URL', async ({ page }) => {
+    /* Regresión de un fallo real, encontrado desplegando.
+     *
+     * El formulario se manda por `fetch`, pero entre que el servidor pinta el
+     * HTML y React engancha el `onSubmit` hay una ventana. Un submit dentro de
+     * esa ventana es nativo, y sin `method` el nativo es GET: la contraseña
+     * terminaba en la query string, o sea en el historial del navegador, en los
+     * logs del proxy y en el `Referer` del pedido siguiente.
+     *
+     * Se envía a propósito lo más rápido posible —Enter apenas existe el campo,
+     * sin esperar hidratación— porque es justo la carrera que hay que perder
+     * sin filtrar nada. */
+    await page.goto('/login')
+    await page.locator('#email').fill('quien@ejemplo.com')
+    await page.locator('#contrasenia').fill('secreto-que-no-debe-viajar')
+    await page.locator('#contrasenia').press('Enter')
+    await page.waitForTimeout(2500)
+
+    const url = page.url()
+    expect(url).not.toContain('secreto-que-no-debe-viajar')
+    expect(url).not.toContain('contrasenia=')
+    expect(url).not.toContain('quien%40ejemplo.com')
+
+    // Y el formulario declara POST, que es la garantía de fondo: aunque el
+    // envío nativo ocurra, los campos van en el cuerpo.
+    await expect(page.locator('form')).toHaveAttribute('method', /post/i)
+  })
+
   test('se entra y se sale', async ({ page }) => {
     await entrar(page)
     await expect(page.getByRole('tablist', { name: 'Secciones' })).toBeVisible()
