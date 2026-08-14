@@ -94,7 +94,11 @@ function Interior({ email, zonaHoraria: zonaInicial, instantaneaInicial, csrf, v
   async function salir(): Promise<void> {
     await fetch('/api/sesion', {
       method: 'DELETE',
-      headers: { 'x-vmstats-csrf': csrf },
+      // `Content-Type` aunque no haya cuerpo: era la única mutación de la
+      // consola que no lo declaraba, y detrás de un proxy con TLS eso hacía que
+      // el logout devolviera 403. Ver la nota sobre `checkOrigin` en
+      // astro.config.mjs.
+      headers: { 'Content-Type': 'application/json', 'x-vmstats-csrf': csrf },
     })
     window.location.assign('/login')
   }

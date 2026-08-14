@@ -12,12 +12,37 @@ export const CREDENCIALES = {
 /** Los cuatro anchos que la spec exige verificar. */
 export const ANCHOS = [360, 768, 1280, 1920] as const
 
+/**
+ * Espera a que las islas de React estén enganchadas.
+ *
+ * Astro marca cada isla con el atributo `ssr` mientras está sin hidratar y se
+ * lo saca al terminar. Esperar eso es esperar exactamente lo que importa: que
+ * los controles respondan.
+ *
+ * Hace falta porque estos tests corren también contra un servidor remoto, donde
+ * la hidratación tarda entre 90 y 280 ms —medido— en vez de ser instantánea
+ * como en local. Sin esta espera, Playwright hace clic en una pestaña que
+ * todavía es HTML muerto y el clic se pierde en silencio: el test falla con un
+ * «sigue en Resumen» que no dice nada de la causa.
+ *
+ * No enmascara un problema del producto: 90–280 ms está por debajo del tiempo
+ * que tarda una persona en ubicar y apretar un control. El que hace clic tan
+ * rápido es el robot.
+ */
+export async function esperarHidratacion(page: Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const islas = document.querySelectorAll('astro-island')
+    return islas.length > 0 && Array.from(islas).every((i) => !i.hasAttribute('ssr'))
+  })
+}
+
 export async function entrar(page: Page): Promise<void> {
   await page.goto('/login')
   await page.getByLabel('Email').fill(CREDENCIALES.email)
   await page.getByLabel('Contraseña').fill(CREDENCIALES.contrasenia)
   await page.getByRole('button', { name: 'Entrar' }).click()
   await page.waitForURL('**/dashboard**')
+  await esperarHidratacion(page)
 }
 
 /**
@@ -60,6 +85,11 @@ export async function culpablesDeDesborde(page: Page): Promise<string[]> {
 
 /** Cambia de sección por la navegación líquida y espera a que el panel exista. */
 export async function irASeccion(page: Page, etiqueta: string): Promise<void> {
+  await esperarHidratacion(page)
   await page.getByRole('tab', { name: etiqueta }).click()
+  // Se confirma por el estado y no por un tiempo fijo: si el clic se perdiera,
+  // el fallo dice «la pestaña no quedó seleccionada» en vez de reventar más
+  // tarde en una aserción que no tiene que ver.
+  await page.getByRole('tab', { name: etiqueta }).and(page.locator('[aria-selected="true"]')).waitFor()
   await page.waitForTimeout(300)
 }

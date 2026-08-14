@@ -36,6 +36,44 @@ export default defineConfig({
   integrations: [react()],
 
   security: {
+    /* Astro trae su propio chequeo de origen, y acá está apagado a propósito.
+     *
+     * Qué hace: para cualquier método que no sea GET/HEAD/OPTIONS, compara la
+     * cabecera `Origin` contra `url.origin` y responde 403 si no coinciden —
+     * salvo que el `content-type` no sea de formulario, en cuyo caso lo deja
+     * pasar.
+     *
+     * Por qué no sirve acá, en concreto:
+     *
+     *  1. `url.origin` no es el que ve el navegador. Detrás de un proxy que
+     *     termina TLS, la app recibe HTTP plano, y Astro sólo confía en
+     *     `x-forwarded-proto` si `security.allowedDomains` está configurado. Con
+     *     esa lista vacía, `url.origin` termina siendo `http://localhost:4321`,
+     *     así que NINGÚN pedido del navegador coincide. Se manifestó como un
+     *     logout que devolvía 403 en producción y funcionaba en local.
+     *     Configurar `allowedDomains` lo arreglaría, pero ataría la imagen de
+     *     Docker al dominio del despliegue: habría que reconstruirla para
+     *     cambiar de dominio.
+     *
+     *  2. Rompe el acceso por clave de API. Un cliente que manda un POST sin
+     *     `content-type` —curl sin `-H`, que es lo normal— no tiene `Origin`, y
+     *     la comparación lo rechaza. La API programática es una función pedida,
+     *     no un efecto colateral.
+     *
+     * Qué lo reemplaza, en `middleware.ts` y `lib/seguridad.ts`:
+     *
+     *  - `origenValido()` compara `Origin` contra `PUBLIC_ORIGIN`, que es el
+     *    origen externo real y lo escribe el operador. Es una comprobación más
+     *    estricta que la de Astro, no más laxa: sabe cuál es el dominio público
+     *    aunque haya diez proxies en el medio.
+     *  - Un token CSRF firmado con HMAC, obligatorio en toda mutación salvo el
+     *    login, que además está limitado por intentos.
+     *
+     * La diferencia deliberada es que aceptamos pedidos sin `Origin` ni
+     * `Referer`: un navegador siempre manda `Origin` en una petición cruzada
+     * que muta, así que su ausencia no es un ataque de CSRF — es un script. */
+    checkOrigin: false,
+
     csp: {
       directives: [
         "default-src 'self'",
