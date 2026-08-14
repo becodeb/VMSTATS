@@ -24,19 +24,50 @@
 # =============================================================================
 
 services:
+  # Alias propios, y no por gusto.
+  #
+  # El collector entra en la red de Coolify (abajo se explica por qué), y ahí
+  # dentro `coolify-db` está publicada con el alias de red `postgres`. Nuestro
+  # servicio se llama igual, así que dentro del collector el nombre `postgres`
+  # resolvía a la base de Coolify: la conexión fallaba con «password
+  # authentication failed», que fue la pista.
+  #
+  # El fallo por credenciales fue suerte. Si por casualidad hubieran coincidido,
+  # el collector habría escrito métricas dentro de la base de Coolify. Por eso
+  # no alcanza con «que funcione»: los nombres que el collector resuelve tienen
+  # que ser imposibles de confundir con los de otro compose de la máquina.
+  postgres:
+    networks:
+      interna:
+        aliases:
+          - vmstats-postgres
+
+  socket-proxy:
+    networks:
+      docker-interna:
+        aliases:
+          - vmstats-socket-proxy
+
   # El collector consulta la API de Coolify. En esta VM no puede hacerlo por la
   # IP del host: ufw bloquea el tránsito desde las redes de Docker hacia el
   # puerto publicado. Entrando a la red propia de Coolify lo alcanza por nombre,
   # sin pasar por el firewall y sin exponer nada.
-  #
-  # Con esto, COOLIFY_BASE_URL vale http://coolify:8080.
   collector:
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-vmstats}:${POSTGRES_PASSWORD}@vmstats-postgres:5432/${POSTGRES_DB:-vmstats}
+      DOCKER_PROXY_HOST: vmstats-socket-proxy
+      COOLIFY_BASE_URL: ${COOLIFY_BASE_URL:-http://coolify:8080}
     networks:
       - interna
       - docker-interna
       - coolify
 
+  # `web` NO entra en la red de Coolify, así que su `postgres` no es ambiguo.
+  # Aun así usa el alias, para que las dos mitades apunten al mismo nombre.
+
   web:
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-vmstats}:${POSTGRES_PASSWORD}@vmstats-postgres:5432/${POSTGRES_DB:-vmstats}
     ports: !override
       - '127.0.0.1:${VMSTATS_PUERTO:-4321}:4321'
     networks:
@@ -49,21 +80,45 @@ services:
       - traefik.docker.network=vmstats-publica
       - traefik.http.services.vmstats.loadbalancer.server.port=4321
 
-      - traefik.http.routers.vmstats-http.entryPoints=http
-      - traefik.http.routers.vmstats-http.rule=Host(`${VMSTATS_DOMINIO}`) || Host(`${VMSTATS_DOMINIO_ALTERNO:-vmstats.invalid}`)
-      - traefik.http.routers.vmstats-http.middlewares=vmstats-a-https
       - traefik.http.middlewares.vmstats-a-https.redirectscheme.scheme=https
-
-      - traefik.http.routers.vmstats-https.entryPoints=https
-      - traefik.http.routers.vmstats-https.rule=Host(`${VMSTATS_DOMINIO}`) || Host(`${VMSTATS_DOMINIO_ALTERNO:-vmstats.invalid}`)
-      - traefik.http.routers.vmstats-https.tls=true
-      - traefik.http.routers.vmstats-https.tls.certresolver=letsencrypt
-      - traefik.http.routers.vmstats-https.service=vmstats
       # Sin compresión, el SSE puede quedarse en un buffer intermedio. Traefik
       # excluye `text/event-stream` de `compress`, así que la franja de tiempo
       # real sigue llegando en cuanto se emite.
-      - traefik.http.routers.vmstats-https.middlewares=vmstats-gzip
       - traefik.http.middlewares.vmstats-gzip.compress=true
+
+      # ---------------------------------------------------------------------
+      # UN ROUTER POR DOMINIO, y no uno con `||`.
+      #
+      # Traefik pide un certificado por router: con los dos dominios en la
+      # misma regla, ACME los mete en una sola orden y basta con que uno falle
+      # para que ninguno obtenga certificado. Pasó exactamente eso: mientras
+      # `consola.ejemplo.com` no tenga registro DNS, Let's Encrypt responde
+      # NXDOMAIN y el dominio alterno —que sí resuelve— se quedaba sin TLS.
+      #
+      # Separados, cada uno se resuelve por su cuenta: el alterno sirve desde
+      # el primer minuto y el definitivo entra solo en cuanto exista el DNS.
+      # ---------------------------------------------------------------------
+      - traefik.http.routers.vmstats-http.entryPoints=http
+      - traefik.http.routers.vmstats-http.rule=Host(`${VMSTATS_DOMINIO}`)
+      - traefik.http.routers.vmstats-http.middlewares=vmstats-a-https
+
+      - traefik.http.routers.vmstats-https.entryPoints=https
+      - traefik.http.routers.vmstats-https.rule=Host(`${VMSTATS_DOMINIO}`)
+      - traefik.http.routers.vmstats-https.tls=true
+      - traefik.http.routers.vmstats-https.tls.certresolver=letsencrypt
+      - traefik.http.routers.vmstats-https.service=vmstats
+      - traefik.http.routers.vmstats-https.middlewares=vmstats-gzip
+
+      - traefik.http.routers.vmstats-alt-http.entryPoints=http
+      - traefik.http.routers.vmstats-alt-http.rule=Host(`${VMSTATS_DOMINIO_ALTERNO:-vmstats.invalid}`)
+      - traefik.http.routers.vmstats-alt-http.middlewares=vmstats-a-https
+
+      - traefik.http.routers.vmstats-alt-https.entryPoints=https
+      - traefik.http.routers.vmstats-alt-https.rule=Host(`${VMSTATS_DOMINIO_ALTERNO:-vmstats.invalid}`)
+      - traefik.http.routers.vmstats-alt-https.tls=true
+      - traefik.http.routers.vmstats-alt-https.tls.certresolver=letsencrypt
+      - traefik.http.routers.vmstats-alt-https.service=vmstats
+      - traefik.http.routers.vmstats-alt-https.middlewares=vmstats-gzip
 
 networks:
   publica:

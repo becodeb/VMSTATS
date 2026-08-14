@@ -36,7 +36,13 @@ export function csrfValido(idSesion: string, recibido: string | null): boolean {
  * `Origin` en las peticiones que mutan estado, así que su ausencia en un POST
  * ya es sospechosa.
  */
-export function origenValido(peticion: Request, urlDelSitio: URL): boolean {
+export function origenValido(
+  peticion: Request,
+  urlDelSitio: URL,
+  /* La lista entra por parámetro para poder probarla: `entorno()` cachea al
+   * primer uso, así que un test no puede cambiarla después. */
+  permitidos: readonly string[] = origenesPermitidos(),
+): boolean {
   const origen = peticion.headers.get('origin')
   if (origen === null) {
     // Sin Origin sólo se acepta si tampoco hay Referer de otro sitio: cubre a
@@ -50,9 +56,26 @@ export function origenValido(peticion: Request, urlDelSitio: URL): boolean {
     }
   }
 
-  const configurado = entorno().PUBLIC_ORIGIN
-  if (configurado.length > 0) return origen === configurado
+  if (permitidos.length > 0) return permitidos.includes(origen)
   return origen === urlDelSitio.origin
+}
+
+/**
+ * Separa y limpia la lista de `PUBLIC_ORIGIN`.
+ *
+ * Descarta las entradas vacías: sin eso, un valor con una coma suelta
+ * —`https://a.com,`— dejaría una cadena vacía en la lista, y una petición con
+ * `Origin: ''` pasaría el control.
+ */
+export function parsearOrigenes(crudo: string): string[] {
+  return crudo
+    .split(',')
+    .map((o) => o.trim().replace(/\/+$/, ''))
+    .filter((o) => o.length > 0)
+}
+
+export function origenesPermitidos(): string[] {
+  return parsearOrigenes(entorno().PUBLIC_ORIGIN)
 }
 
 /** Métodos que no mutan estado y por lo tanto no piden CSRF. */

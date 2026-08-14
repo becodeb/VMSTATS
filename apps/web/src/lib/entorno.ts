@@ -22,7 +22,16 @@ const esquema = z.object({
   /** En producción la cookie va con `Secure` y el CSP se endurece. */
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
 
-  /** Origen público, para validar `Origin` en las mutaciones. */
+  /**
+   * Origen público, para validar `Origin` en las mutaciones.
+   *
+   * Admite varios separados por coma. No es una comodidad: durante una
+   * migración de dominio la consola está accesible por dos nombres a la vez, y
+   * con uno solo configurado el otro deja de poder iniciar sesión. Cada origen
+   * lo escribe el operador a mano, así que la lista sigue siendo cerrada.
+   *
+   * Vacío significa «comparar contra el origen del propio pedido».
+   */
   PUBLIC_ORIGIN: z.string().default(''),
 
   /** Zona horaria inicial si la base todavía no tiene preferencias. */
