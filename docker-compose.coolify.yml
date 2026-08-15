@@ -1,0 +1,66 @@
+# =============================================================================
+# Superposición para cuando Coolify gestiona el despliegue.
+#
+# Coolify clona el repositorio, inyecta sus propias etiquetas de Traefik y se
+# encarga del dominio y del certificado. Este archivo NO toca nada de eso: sólo
+# agrega las dos cosas que Coolify no puede adivinar.
+#
+# Se usa como comando de arranque de la aplicación en Coolify:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.coolify.yml up -d
+#
+# Es la alternativa a docker-compose.traefik.yml, no un complemento: aquél sirve
+# cuando vmstats corre al lado de Coolify sin que Coolify lo administre.
+# =============================================================================
+
+services:
+  # Alias inequívocos, y no por gusto.
+  #
+  # El collector entra en la red de Coolify (abajo se explica por qué), y ahí
+  # dentro `coolify-db` está publicada con el alias de red `postgres`. Nuestro
+  # servicio se llama igual, así que el nombre `postgres` resolvía a la base de
+  # Coolify: la conexión fallaba con «password authentication failed».
+  #
+  # Que fallara por credenciales fue suerte. Si por casualidad hubieran
+  # coincidido, el collector habría escrito métricas dentro de la base de
+  # Coolify. Los nombres que resuelve el collector tienen que ser imposibles de
+  # confundir con los de cualquier otro compose de la máquina.
+  postgres:
+    networks:
+      interna:
+        aliases:
+          - vmstats-postgres
+
+  socket-proxy:
+    networks:
+      docker-interna:
+        aliases:
+          - vmstats-socket-proxy
+
+  # El collector consulta la API de Coolify. En una VM con ufw no puede hacerlo
+  # por la IP del host: el firewall bloquea el tránsito desde las redes de
+  # Docker hacia los puertos publicados. Entrando en la red propia de Coolify lo
+  # alcanza por nombre, sin atravesar el firewall y sin exponer ningún puerto.
+  collector:
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-vmstats}:${POSTGRES_PASSWORD}@vmstats-postgres:5432/${POSTGRES_DB:-vmstats}
+      DOCKER_PROXY_HOST: vmstats-socket-proxy
+      COOLIFY_BASE_URL: ${COOLIFY_BASE_URL:-http://coolify:8080}
+    networks:
+      - interna
+      - docker-interna
+      - coolify
+
+  web:
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-vmstats}:${POSTGRES_PASSWORD}@vmstats-postgres:5432/${POSTGRES_DB:-vmstats}
+    # El puerto no se publica: a `web` llega el proxy de Coolify por la red que
+    # él mismo administra. Publicarlo dejaría la consola accesible por IP y sin
+    # TLS, esquivando el proxy. `!override` reemplaza la lista, no la amplía.
+    ports: !override []
+
+networks:
+  # La crea Coolify al instalarse. `web` no entra acá: sólo el collector, y sólo
+  # para leer la API.
+  coolify:
+    external: true
