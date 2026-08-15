@@ -1,11 +1,38 @@
 # Operación
 
+## Los tres archivos de compose
+
+`docker-compose.yml` es el despliegue completo y funciona solo. Los otros dos no
+lo reemplazan: se superponen, y se elige uno según quién administre el stack.
+
+| Archivo | Cuándo |
+|---|---|
+| `docker-compose.yml` | Solo. Desarrollo, o una VM donde vmstats es lo único que hay. |
+| `+ docker-compose.coolify.yml` | Coolify administra el despliegue. Él pone el dominio, el certificado y las etiquetas de Traefik. |
+| `+ docker-compose.traefik.yml` | vmstats corre **al lado** de Coolify sin que Coolify lo administre. Publica por el mismo Traefik, con sus propias etiquetas. |
+
+Los dos últimos aportan lo mismo en el fondo: alias de red inequívocos y la red
+de Coolify para el collector. Hacen falta porque `coolify-db` está publicada con
+el alias `postgres`, igual que nuestro servicio; sin alias propios, el collector
+termina hablándole a la base de Coolify. Está explicado en cada archivo.
+
 ## Desplegar en Coolify
 
 ### 1. Crear el recurso
 
 En Coolify: **New Resource → Docker Compose**, apuntando a este repositorio.
 Coolify detecta `docker-compose.yml` en la raíz.
+
+Si el collector tiene que leer la API de Coolify, poné en **Custom Start
+Command**:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.coolify.yml up -d
+```
+
+Sin eso, todo funciona salvo la pestaña Despliegues, que quedará vacía porque el
+collector no alcanza la API de Coolify: en una VM con `ufw`, el firewall bloquea
+el tránsito desde las redes de Docker hacia los puertos publicados del host.
 
 ### 2. Variables de entorno
 
