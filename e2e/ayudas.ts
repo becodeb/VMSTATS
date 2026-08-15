@@ -12,6 +12,32 @@ export const CREDENCIALES = {
 /** Los cuatro anchos que la spec exige verificar. */
 export const ANCHOS = [360, 768, 1280, 1920] as const
 
+/** Origen contra el que corren los tests. */
+export const BASE = process.env['E2E_BASE_URL'] ?? 'http://localhost:4321'
+
+/**
+ * ¿El error lo provocó un recurso de otro origen?
+ *
+ * Detrás de Cloudflare con Web Analytics activado, el proxy INYECTA en el HTML
+ * un `<script>` hacia `static.cloudflareinsights.com`. Nuestro CSP lo bloquea —
+ * que es justo lo que tiene que hacer, porque la consola no manda telemetría a
+ * terceros— y el bloqueo aparece como error de consola.
+ *
+ * Ese error es la prueba de que la política funciona, no un fallo de la app.
+ * Filtrarlo por origen y no por nombre concreto: cualquier tercero inyectado
+ * por un proxy futuro cae en la misma categoría, y una violación de CSP que
+ * involucre a nuestro propio origen sigue haciendo fallar el test.
+ */
+export function errorDeTercero(texto: string): boolean {
+  const url = /https?:\/\/[^\s'"]+/.exec(texto)?.[0]
+  if (url === undefined) return false
+  try {
+    return new URL(url).origin !== new URL(BASE).origin
+  } catch {
+    return false
+  }
+}
+
 /**
  * Espera a que las islas de React estén enganchadas.
  *

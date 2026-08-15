@@ -1,5 +1,12 @@
 import { expect, test } from '@playwright/test'
-import { ANCHOS, culpablesDeDesborde, desbordaHorizontal, entrar, irASeccion } from './ayudas'
+import {
+  ANCHOS,
+  culpablesDeDesborde,
+  desbordaHorizontal,
+  entrar,
+  errorDeTercero,
+  irASeccion,
+} from './ayudas'
 
 /* ============================================================================
  * End-to-end de la consola.
@@ -84,8 +91,9 @@ test.describe('hidratación', () => {
     await entrar(page)
     await page.waitForTimeout(1500)
 
-    expect(errores.filter((e) => /content security policy|refused to execute/i.test(e))).toEqual([])
-    expect(errores).toEqual([])
+    const propios = errores.filter((e) => !errorDeTercero(e))
+    expect(propios.filter((e) => /content security policy|refused to execute/i.test(e))).toEqual([])
+    expect(propios).toEqual([])
   })
 
   test('cambiar de pestaña actualiza la URL y el contenido', async ({ page }) => {
@@ -317,7 +325,7 @@ test.describe('enlaces directos', () => {
         'aria-selected',
         'true',
       )
-      expect(errores).toEqual([])
+      expect(errores.filter((e) => !errorDeTercero(e))).toEqual([])
     })
   }
 })
