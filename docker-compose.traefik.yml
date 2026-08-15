@@ -92,7 +92,7 @@ services:
       # Traefik pide un certificado por router: con los dos dominios en la
       # misma regla, ACME los mete en una sola orden y basta con que uno falle
       # para que ninguno obtenga certificado. Pasó exactamente eso: mientras
-      # `consola.ejemplo.com` no tenga registro DNS, Let's Encrypt responde
+      # el dominio definitivo no tenga registro DNS, Let's Encrypt responde
       # NXDOMAIN y el dominio alterno —que sí resuelve— se quedaba sin TLS.
       #
       # Separados, cada uno se resuelve por su cuenta: el alterno sirve desde
