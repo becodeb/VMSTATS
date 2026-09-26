@@ -4,7 +4,7 @@ import { z } from 'zod'
  * Rangos temporales y selección de resolución.
  *
  * Regla de la spec: un endpoint histórico devuelve entre 300 y 800 puntos por
- * serie, sin importar si el rango son 15 minutos o 30 días. Nadie manda un
+ * serie, sin importar si el rango son 15 minutos o 7 días. Nadie manda un
  * millón de filas al navegador.
  * ========================================================================== */
 
@@ -14,29 +14,46 @@ export const RANGOS = {
   '6h': { etiqueta: '6 horas', segundos: 6 * 60 * 60 },
   '24h': { etiqueta: '24 horas', segundos: 24 * 60 * 60 },
   '7d': { etiqueta: '7 días', segundos: 7 * 24 * 60 * 60 },
-  '30d': { etiqueta: '30 días', segundos: 30 * 24 * 60 * 60 },
 } as const
 
 export type ClaveRango = keyof typeof RANGOS
 export const CLAVES_RANGO = Object.keys(RANGOS) as [ClaveRango, ...ClaveRango[]]
 export const esquemaRango = z.enum(CLAVES_RANGO)
 
-/** Las tres resoluciones que viven en la base, en segundos por muestra. */
+/**
+ * Las tres resoluciones que viven en la base, en segundos por muestra.
+ *
+ * `raw` es la cadencia del host (10 s); los contenedores se persisten cada
+ * 30 s pero comparten la misma resolución lógica. `15m` y no `30m` para el
+ * tramo largo: el gráfico de 7 días pide buckets de 900 s, y con agregados de
+ * 30 minutos quedaría siempre «degradado» a la mitad de puntos.
+ */
 export const RESOLUCIONES = {
   raw: 10,
-  '1m': 60,
   '5m': 300,
+  '15m': 900,
 } as const
 
 export type Resolucion = keyof typeof RESOLUCIONES
 export const CLAVES_RESOLUCION = Object.keys(RESOLUCIONES) as [Resolucion, ...Resolucion[]]
 export const esquemaResolucion = z.enum(CLAVES_RESOLUCION)
 
-/** Retención por defecto, en días. Configurable vía app_settings. */
-export const RETENCION_POR_DEFECTO: Record<Resolucion, number> = {
-  raw: 7,
-  '1m': 30,
-  '5m': 365,
+/**
+ * Retención de cada resolución, en horas. Fija: es lo que mantiene acotado el
+ * disco de la VM, y no una preferencia que convenga estirar desde la UI.
+ *
+ *   - crudos  26 h  → resolución completa para el rango de 24 h, con margen.
+ *   - 5 min   3 días
+ *   - 15 min  7 días → lo más viejo que se guarda. Nada pasa de una semana.
+ *
+ * Las resoluciones se solapan (el agregado de 15 min también cubre las últimas
+ * horas) porque cada consulta lee de una sola fuente. El volumen lo ponen los
+ * crudos, así que el solapamiento cuesta poco.
+ */
+export const RETENCION_HORAS: Record<Resolucion, number> = {
+  raw: 26,
+  '5m': 72,
+  '15m': 168,
 }
 
 /**
@@ -75,7 +92,7 @@ export interface PlanConsulta {
 export function planificarConsulta(
   desde: Date,
   hasta: Date,
-  retencionDias: Record<Resolucion, number> = RETENCION_POR_DEFECTO,
+  retencionHoras: Record<Resolucion, number> = RETENCION_HORAS,
   objetivoMaximo: number = PUNTOS_MAXIMOS,
 ): PlanConsulta {
   const duracionSeg = Math.max(1, Math.round((hasta.getTime() - desde.getTime()) / 1000))
@@ -91,15 +108,22 @@ export function planificarConsulta(
 
   // Antigüedad del extremo más viejo del rango: decide qué resoluciones
   // todavía tienen datos ahí.
-  const antiguedadDias = (Date.now() - desde.getTime()) / 86_400_000
+  const antiguedadHoras = (Date.now() - desde.getTime()) / 3_600_000
 
   const disponibles = CLAVES_RESOLUCION.filter(
-    (r) => antiguedadDias <= (retencionDias[r] ?? 0),
+    (r) => antiguedadHoras <= (retencionHoras[r] ?? 0),
   )
   // Preferimos la fuente más fina que quepa en el bucket: agregar hacia abajo
   // siempre es correcto, interpolar hacia arriba no.
   const masFina = disponibles.find((r) => RESOLUCIONES[r] <= bucket)
-  const fuente = masFina ?? disponibles[disponibles.length - 1] ?? '5m'
+  // Si ninguna disponible entra en el bucket, la más fina de las que quedan:
+  // es la que menos degrada.
+  // Si ninguna cubre el rango entero (7 días justos ya rozan el borde de la
+  // retención más larga), la que más atrás llega: es la que menos hueco deja.
+  const masLarga = CLAVES_RESOLUCION.toSorted(
+    (a, b) => (retencionHoras[b] ?? 0) - (retencionHoras[a] ?? 0),
+  )[0]
+  const fuente = masFina ?? disponibles[0] ?? masLarga ?? '15m'
   const degradado = RESOLUCIONES[fuente] > bucket
 
   // Si tuvimos que degradar, el bucket no puede ser más fino que la fuente.

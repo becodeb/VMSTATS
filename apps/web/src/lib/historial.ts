@@ -7,7 +7,7 @@ import {
   type RespuestaHistorial,
   type Serie,
 } from '@vmstats/shared'
-import { hosts, type BaseDatos, type PreferenciasApp } from '@vmstats/db'
+import { hosts, type BaseDatos } from '@vmstats/db'
 import { aFecha, aNumeroOpcional } from './filas.js'
 
 /* ============================================================================
@@ -18,7 +18,7 @@ import { aFecha, aNumeroOpcional } from './filas.js'
  * 1. La resolución se elige sola. El navegador pide un rango, no una
  *    granularidad; el planificador de @vmstats/shared decide de qué resolución
  *    leer y con qué ancho de bucket para devolver entre 300 y 800 puntos. Pedir
- *    30 días nunca manda 260.000 filas.
+ *    7 días nunca manda 60.000 filas.
  *
  * 2. Los huecos se conservan. La grilla de buckets sale de `generate_series` y
  *    los datos entran por LEFT JOIN, así que un período sin muestras produce
@@ -79,7 +79,6 @@ export interface OpcionesHistorial {
   hasta: Date
   series: readonly ClaveSerie[]
   hostId?: string | undefined
-  preferencias: PreferenciasApp
 }
 
 export async function consultarHistorial(
@@ -88,11 +87,7 @@ export async function consultarHistorial(
 ): Promise<RespuestaHistorial> {
   const hostId = opciones.hostId ?? (await hostPorDefecto(db))
 
-  const plan = planificarConsulta(opciones.desde, opciones.hasta, {
-    raw: opciones.preferencias.retencionRawDias,
-    '1m': opciones.preferencias.retencionUnMinutoDias,
-    '5m': opciones.preferencias.retencionCincoMinutosDias,
-  })
+  const plan = planificarConsulta(opciones.desde, opciones.hasta)
 
   const vacio: RespuestaHistorial = {
     desde: opciones.desde.toISOString(),

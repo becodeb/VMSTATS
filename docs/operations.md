@@ -170,19 +170,28 @@ levanta contra ella.
 
 ## Retención y espacio
 
-Ajustable desde **Preferencias** en la consola.
+Fija, no se edita desde la consola (Preferencias sólo la muestra):
 
-| Resolución | Por defecto | Aproximado por día y host |
-| --- | --- | --- |
-| Cruda (10 s) | 7 días | ~30 MB |
-| 1 minuto | 30 días | ~5 MB |
-| 5 minutos | 365 días | ~1 MB |
+| Resolución | Se guarda |
+| --- | --- |
+| Cruda (host 10 s, contenedores 30 s, filesystems 60 s) | 26 horas |
+| 5 minutos | 3 días |
+| 15 minutos | 7 días |
 
-Con los valores por defecto, una VM con veinte contenedores ronda **1–2 GB** en
-régimen. El collector aplica la retención una vez por hora, en tandas acotadas
-para no tomar locks largos.
+Nada pasa de siete días. Con unos 70 contenedores la base ronda **unos cientos
+de MB** en régimen, casi todo crudos de contenedores de las últimas 26 horas. El
+collector agrega cada 5 minutos y aplica la retención una vez por hora, en
+tandas acotadas para no tomar locks largos.
 
-Bajar un valor borra datos en la próxima pasada y **no se puede deshacer**.
+Los `DELETE` liberan espacio para Postgres pero no le devuelven disco al
+sistema. Después de una purga grande (por ejemplo, al pasar a este esquema desde
+uno con más retención) hace falta un `VACUUM FULL` por tabla, una por vez: toma
+un lock exclusivo mientras reescribe la tabla, así que la ingesta espera unos
+segundos, y necesita espacio libre del tamaño de lo que queda vivo.
+
+```sh
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"   -c "VACUUM (FULL, ANALYZE) container_metric_samples;"'
+```
 
 Ver el tamaño real:
 

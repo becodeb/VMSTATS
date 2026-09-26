@@ -1,6 +1,5 @@
 import type { APIRoute } from 'astro'
 import { esquemaConsultaHistorial, rangoDesdeClave } from '@vmstats/shared'
-import { leerPreferencias } from '@vmstats/db'
 import { base } from '@/lib/base'
 import { consultarHistorial, historialACsv } from '@/lib/historial'
 import { error, protegido } from '@/lib/respuestas'
@@ -34,13 +33,11 @@ export const GET: APIRoute = async ({ url }) =>
     }
 
     const db = base()
-    const preferencias = await leerPreferencias(db)
     const respuesta = await consultarHistorial(db, {
       desde,
       hasta,
       series: consulta.series,
       hostId: consulta.hostId,
-      preferencias,
     })
 
     const nombre = `vmstats-${desde.toISOString().slice(0, 10)}-a-${hasta

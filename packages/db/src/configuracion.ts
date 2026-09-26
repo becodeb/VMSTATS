@@ -15,9 +15,9 @@ import type { BaseDatos } from './index.js'
 export const esquemaPreferenciasApp = z.object({
   /** Zona de visualización. Los datos siempre se guardan en UTC. */
   zonaHoraria: z.string().min(1).max(64).default(ZONA_HORARIA_POR_DEFECTO),
-  retencionRawDias: z.number().int().min(1).max(90).default(7),
-  retencionUnMinutoDias: z.number().int().min(1).max(400).default(30),
-  retencionCincoMinutosDias: z.number().int().min(1).max(1200).default(365),
+  /* La retención ya no es una preferencia: es fija (RETENCION_HORAS en
+   * @vmstats/shared). Las claves viejas que queden en el jsonb se descartan al
+   * leer, porque el esquema no las conoce. */
   /** Los logs de contenedor pueden requerir un token de Coolify con
    *  `read:sensitive`. Apagado por defecto, como pide la spec. */
   logsHabilitados: z.boolean().default(false),

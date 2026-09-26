@@ -3,6 +3,7 @@ import {
   PUNTOS_MAXIMOS,
   PUNTOS_MINIMOS,
   RESOLUCIONES,
+  RETENCION_HORAS,
   datosDesactualizados,
   formatearBytes,
   formatearDuracion,
@@ -19,15 +20,15 @@ import {
 /* ============================================================================
  * Planificación de consultas y formato.
  *
- * `planificarConsulta` es lo que evita que pedir 30 días mande 260.000 filas al
+ * `planificarConsulta` es lo que evita que pedir 7 días mande 60.000 filas al
  * navegador. Los tests recorren todos los rangos de la UI y comprueban la
  * promesa concreta de la spec: entre 300 y 800 puntos por serie.
  * ========================================================================== */
 
-const RETENCION = { raw: 7, '1m': 30, '5m': 365 }
+const RETENCION = RETENCION_HORAS
 
 describe('planificarConsulta', () => {
-  const RANGOS: ClaveRango[] = ['15m', '1h', '6h', '24h', '7d', '30d']
+  const RANGOS: ClaveRango[] = ['15m', '1h', '6h', '24h', '7d']
 
   for (const clave of RANGOS) {
     it(`devuelve una cantidad manejable de puntos para ${clave}`, () => {
@@ -49,7 +50,7 @@ describe('planificarConsulta', () => {
   })
 
   it('sube de resolución a medida que crece el rango', () => {
-    const fuentes = (['1h', '24h', '30d'] as ClaveRango[]).map((c) => {
+    const fuentes = (['1h', '24h', '7d'] as ClaveRango[]).map((c) => {
       const { desde, hasta } = rangoDesdeClave(c)
       return planificarConsulta(desde, hasta, RETENCION).fuente
     })
@@ -58,9 +59,32 @@ describe('planificarConsulta', () => {
     expect(RESOLUCIONES[fuentes[1]!]).toBeLessThanOrEqual(RESOLUCIONES[fuentes[2]!])
   })
 
+  it('el rango de 24 h sale entero de los crudos', () => {
+    const { desde, hasta } = rangoDesdeClave('24h')
+    const plan = planificarConsulta(desde, hasta, RETENCION)
+    expect(plan.fuente).toBe('raw')
+    expect(plan.degradado).toBe(false)
+  })
+
+  it('el rango de 7 días sale del agregado de 15 min sin degradar', () => {
+    // 7 días justos rozan el borde de la retención más larga: igual tiene que
+    // elegir la fuente que más atrás llega, no la más fina.
+    const { desde, hasta } = rangoDesdeClave('7d')
+    const plan = planificarConsulta(desde, hasta, RETENCION)
+    expect(plan.fuente).toBe('15m')
+    expect(plan.degradado).toBe(false)
+    expect(plan.puntosEstimados).toBeGreaterThanOrEqual(PUNTOS_MINIMOS)
+  })
+
+  it('un día de hace dos días sale del agregado de 5 min', () => {
+    const hasta = new Date(Date.now() - 1 * 86_400_000)
+    const desde = new Date(hasta.getTime() - 86_400_000)
+    expect(planificarConsulta(desde, hasta, RETENCION).fuente).toBe('5m')
+  })
+
   it('no elige una fuente que la retención ya borró', () => {
-    // Un rango de hace 20 días: los crudos se guardan 7.
-    const hasta = new Date(Date.now() - 19 * 86_400_000)
+    // Un rango de hace 3 días: los crudos se guardan 26 horas.
+    const hasta = new Date(Date.now() - 2 * 86_400_000)
     const desde = new Date(hasta.getTime() - 3600_000)
     const plan = planificarConsulta(desde, hasta, RETENCION)
     expect(plan.fuente).not.toBe('raw')
@@ -77,7 +101,7 @@ describe('planificarConsulta', () => {
   })
 
   it('nunca devuelve un bucket más fino que su fuente', () => {
-    for (const dias of [0, 3, 10, 60, 300]) {
+    for (const dias of [0, 1, 3, 6, 10, 300]) {
       const hasta = new Date(Date.now() - dias * 86_400_000)
       const desde = new Date(hasta.getTime() - 3600_000)
       const plan = planificarConsulta(desde, hasta, RETENCION)

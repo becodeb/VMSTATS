@@ -2,42 +2,49 @@ import { sql } from 'drizzle-orm'
 import type { BaseDatos } from '@vmstats/db'
 
 /* ============================================================================
- * Agregación de muestras crudas a 1 minuto y de 1 minuto a 5 minutos.
+ * Agregación progresiva: crudos → 5 minutos → 15 minutos.
  *
- * Tres decisiones que vale la pena dejar escritas:
+ * Decisiones que vale la pena dejar escritas:
  *
  * 1. Se recalcula una ventana móvil reciente en cada corrida, en vez de llevar
- *    una marca de agua. `ON CONFLICT DO UPDATE` hace que recalcular sea
- *    inofensivo, y así el sistema se repara solo: si el collector estuvo caído
- *    dos horas, la primera corrida al volver rellena el hueco sin que nadie
- *    tenga que correr nada a mano.
+ *    una marca de agua, y al arrancar el collector una ventana larga que cubre
+ *    toda la retención del origen. `ON CONFLICT DO UPDATE` hace que recalcular
+ *    sea inofensivo, así que el sistema se repara solo después de una caída.
  *
- * 2. Sólo se agregan buckets ya cerrados. Un bucket del minuto en curso está
- *    incompleto, y guardarlo daría un promedio calculado sobre dos muestras que
- *    después nunca se corrige.
+ * 2. Un bucket ya guardado sólo se reescribe si el recálculo resume MÁS
+ *    muestras que antes (`sample_count`). Recalcular un bucket cerrado da lo
+ *    mismo, y reescribirlo igual era lo que generaba millones de tuplas
+ *    muertas y tenía al Postgres de la VM al 70 % de CPU. La misma regla evita
+ *    que un recálculo sobre un origen que la retención ya empezó a recortar
+ *    pise un agregado completo con uno parcial.
  *
- * 3. Los gauges y las tasas se promedian; los contadores de errores y descartes
- *    se suman, porque son cuentas de eventos y sumar es lo correcto. El costo
- *    es que un pico de un minuto se diluye en el promedio de cinco: por eso los
- *    datos crudos cada 10 s se guardan siete días, que es donde se va a mirar
- *    un incidente reciente. Está documentado en docs/architecture.md.
+ * 3. Sólo se agregan buckets ya cerrados. Un bucket del intervalo en curso está
+ *    incompleto; se agrega en la próxima corrida, cuando cerró.
+ *
+ * 4. Gauges y tasas se promedian; contadores de eventos (errores, descartes) se
+ *    suman; lo monótono o identitario (uptime, reinicios, memoria total) va con
+ *    `max`; el filesystem se queda con el último valor del bucket, que describe
+ *    mejor «cuánto disco había» que un promedio.
  * ========================================================================== */
 
-export type Origen = 'raw' | '1m'
-export type Destino = '1m' | '5m'
+export type Origen = 'raw' | '5m'
+export type Destino = '5m' | '15m'
 
 export interface PlanRollup {
   origen: Origen
   destino: Destino
   /** Ancho del bucket, como intervalo de PostgreSQL. */
   intervalo: string
-  /** Cuánto hacia atrás recalcular en cada corrida. */
+  /** Cuánto hacia atrás recalcular en cada corrida normal. */
   ventanaHoras: number
+  /** Cuánto hacia atrás recalcular en la primera corrida después de arrancar.
+   *  Tiene que quedar dentro de la retención del origen. */
+  ventanaArranqueHoras: number
 }
 
 export const PLANES: readonly PlanRollup[] = [
-  { origen: 'raw', destino: '1m', intervalo: '1 minute', ventanaHoras: 2 },
-  { origen: '1m', destino: '5m', intervalo: '5 minutes', ventanaHoras: 12 },
+  { origen: 'raw', destino: '5m', intervalo: '5 minutes', ventanaHoras: 1, ventanaArranqueHoras: 24 },
+  { origen: '5m', destino: '15m', intervalo: '15 minutes', ventanaHoras: 3, ventanaArranqueHoras: 168 },
 ]
 
 /**
@@ -59,8 +66,13 @@ export interface ResultadoRollup {
   filasContenedor: number
 }
 
-export async function correrRollup(db: BaseDatos, plan: PlanRollup): Promise<ResultadoRollup> {
-  const desde = sql.raw(`now() - interval '${plan.ventanaHoras} hours'`)
+export async function correrRollup(
+  db: BaseDatos,
+  plan: PlanRollup,
+  arranque = false,
+): Promise<ResultadoRollup> {
+  const horas = arranque ? plan.ventanaArranqueHoras : plan.ventanaHoras
+  const desde = sql.raw(`now() - interval '${horas} hours'`)
   // El corte de arriba deja fuera el bucket en curso: `date_bin` sobre `now()`
   // devuelve el arranque del bucket actual, que todavía se está llenando.
   const hasta = sql.raw(`date_bin(interval '${plan.intervalo}', now(), timestamptz '${ORIGEN_GRILLA}')`)
@@ -115,6 +127,7 @@ export async function correrRollup(db: BaseDatos, plan: PlanRollup): Promise<Res
       psi_mem_some10 = EXCLUDED.psi_mem_some10,
       psi_io_some10 = EXCLUDED.psi_io_some10,
       sample_count = EXCLUDED.sample_count
+    WHERE EXCLUDED.sample_count > host_metric_samples.sample_count
   `)
 
   const filasRed = await db.execute(sql`
@@ -136,6 +149,7 @@ export async function correrRollup(db: BaseDatos, plan: PlanRollup): Promise<Res
       rx_errors = EXCLUDED.rx_errors, tx_errors = EXCLUDED.tx_errors,
       rx_drops = EXCLUDED.rx_drops, tx_drops = EXCLUDED.tx_drops,
       sample_count = EXCLUDED.sample_count
+    WHERE EXCLUDED.sample_count > network_metric_samples.sample_count
   `)
 
   const filasDisco = await db.execute(sql`
@@ -158,6 +172,7 @@ export async function correrRollup(db: BaseDatos, plan: PlanRollup): Promise<Res
       read_latency_ms = EXCLUDED.read_latency_ms,
       write_latency_ms = EXCLUDED.write_latency_ms,
       sample_count = EXCLUDED.sample_count
+    WHERE EXCLUDED.sample_count > disk_metric_samples.sample_count
   `)
 
   // El filesystem cambia despacio: el último valor del bucket describe mejor
@@ -167,16 +182,22 @@ export async function correrRollup(db: BaseDatos, plan: PlanRollup): Promise<Res
       host_id, resolution, ts, mount_point, device, fstype,
       size_bytes, used_bytes, available_bytes, inodes_total, inodes_used, sample_count
     )
-    SELECT DISTINCT ON (host_id, bucket, mount_point)
-      host_id, ${plan.destino}::text, ${bucket} AS bucket, mount_point, device, fstype,
-      size_bytes, used_bytes, available_bytes, inodes_total, inodes_used, 1
+    SELECT
+      host_id, ${plan.destino}::text, ${bucket} AS bucket, mount_point,
+      (array_agg(device ORDER BY ts DESC))[1], (array_agg(fstype ORDER BY ts DESC))[1],
+      (array_agg(size_bytes ORDER BY ts DESC))[1], (array_agg(used_bytes ORDER BY ts DESC))[1],
+      (array_agg(available_bytes ORDER BY ts DESC))[1],
+      (array_agg(inodes_total ORDER BY ts DESC))[1], (array_agg(inodes_used ORDER BY ts DESC))[1],
+      sum(sample_count)
     FROM filesystem_metric_samples
     WHERE resolution = ${plan.origen} AND ts >= ${desde} AND ts < ${hasta}
-    ORDER BY host_id, bucket, mount_point, ts DESC
+    GROUP BY host_id, bucket, mount_point
     ON CONFLICT (host_id, resolution, ts, mount_point) DO UPDATE SET
       size_bytes = EXCLUDED.size_bytes, used_bytes = EXCLUDED.used_bytes,
       available_bytes = EXCLUDED.available_bytes,
-      inodes_total = EXCLUDED.inodes_total, inodes_used = EXCLUDED.inodes_used
+      inodes_total = EXCLUDED.inodes_total, inodes_used = EXCLUDED.inodes_used,
+      sample_count = EXCLUDED.sample_count
+    WHERE EXCLUDED.sample_count > filesystem_metric_samples.sample_count
   `)
 
   const filasContenedor = await db.execute(sql`
@@ -205,6 +226,7 @@ export async function correrRollup(db: BaseDatos, plan: PlanRollup): Promise<Res
       uptime_seconds = EXCLUDED.uptime_seconds, restarts = EXCLUDED.restarts,
       state = EXCLUDED.state, health = EXCLUDED.health,
       sample_count = EXCLUDED.sample_count
+    WHERE EXCLUDED.sample_count > container_metric_samples.sample_count
   `)
 
   return {
@@ -217,11 +239,14 @@ export async function correrRollup(db: BaseDatos, plan: PlanRollup): Promise<Res
   }
 }
 
-export async function correrTodosLosRollups(db: BaseDatos): Promise<ResultadoRollup[]> {
+export async function correrTodosLosRollups(
+  db: BaseDatos,
+  arranque = false,
+): Promise<ResultadoRollup[]> {
   const resultados: ResultadoRollup[] = []
-  // En orden: 5m se alimenta de lo que acaba de escribir 1m.
+  // En orden: 15m se alimenta de lo que acaba de escribir 5m.
   for (const plan of PLANES) {
-    resultados.push(await correrRollup(db, plan))
+    resultados.push(await correrRollup(db, plan, arranque))
   }
   return resultados
 }

@@ -159,7 +159,7 @@ describe.skipIf(!hayBase)('integración con PostgreSQL', () => {
       `)
     })
 
-    it('agrega los crudos a buckets de un minuto y de cinco', async () => {
+    it('agrega los crudos a buckets de 5 minutos y de 15', async () => {
       await correrTodosLosRollups(db)
 
       const filas = await db.execute<{ resolution: string; buckets: number }>(sql`
@@ -169,8 +169,8 @@ describe.skipIf(!hayBase)('integración con PostgreSQL', () => {
       `)
 
       const porResolucion = new Map(filas.rows.map((f) => [f.resolution, f.buckets]))
-      expect(porResolucion.get('1m') ?? 0).toBeGreaterThan(20)
-      expect(porResolucion.get('5m') ?? 0).toBeGreaterThan(3)
+      expect(porResolucion.get('5m') ?? 0).toBeGreaterThanOrEqual(4)
+      expect(porResolucion.get('15m') ?? 0).toBeGreaterThanOrEqual(1)
     })
 
     it('el promedio del bucket es el de sus muestras', async () => {
@@ -179,8 +179,8 @@ describe.skipIf(!hayBase)('integración con PostgreSQL', () => {
         FROM host_metric_samples h
         JOIN host_metric_samples r
           ON r.resolution = 'raw' AND r.host_id = h.host_id
-         AND r.ts >= h.ts AND r.ts < h.ts + interval '1 minute'
-        WHERE h.resolution = '1m' AND h.host_id = ${HOST}
+         AND r.ts >= h.ts AND r.ts < h.ts + interval '5 minutes'
+        WHERE h.resolution = '5m' AND h.host_id = ${HOST}
         GROUP BY h.ts, h.cpu_total
         LIMIT 5
       `)
@@ -202,8 +202,24 @@ describe.skipIf(!hayBase)('integración con PostgreSQL', () => {
 
       const antes = await contar()
       await correrTodosLosRollups(db)
-      await correrTodosLosRollups(db)
+      await correrTodosLosRollups(db, true)
       expect(await contar()).toBe(antes)
+    })
+
+    it('no reescribe un bucket que no cambió', async () => {
+      // Reescribir lo mismo cada minuto era lo que llenaba la tabla de tuplas
+      // muertas. `xmin` cambia con cada UPDATE: si queda igual, no se tocó.
+      const versiones = async () => {
+        const r = await db.execute<{ ts: string; v: string }>(sql`
+          SELECT ts::text AS ts, xmin::text AS v FROM host_metric_samples
+          WHERE host_id = ${HOST} AND resolution <> 'raw' ORDER BY ts, resolution
+        `)
+        return r.rows
+      }
+
+      const antes = await versiones()
+      await correrTodosLosRollups(db, true)
+      expect(await versiones()).toEqual(antes)
     })
 
     it('no agrega el bucket que todavía se está llenando', async () => {
@@ -211,8 +227,8 @@ describe.skipIf(!hayBase)('integración con PostgreSQL', () => {
       // calculado sobre dos muestras.
       const r = await db.execute<{ n: number }>(sql`
         SELECT count(*)::int AS n FROM host_metric_samples
-        WHERE host_id = ${HOST} AND resolution = '1m'
-          AND ts >= date_bin(interval '1 minute', now(), timestamptz '2000-01-01')
+        WHERE host_id = ${HOST} AND resolution = '5m'
+          AND ts >= date_bin(interval '5 minutes', now(), timestamptz '2000-01-01')
       `)
       expect(r.rows[0]?.n).toBe(0)
     })
@@ -253,8 +269,14 @@ describe.skipIf(!hayBase)('integración con PostgreSQL', () => {
   it('la retención borra lo viejo y respeta lo reciente', async () => {
     await db.execute(sql`DELETE FROM host_metric_samples WHERE host_id = ${HOST}`)
 
-    // Una muestra de hace 30 días y otra de recién.
-    for (const dias of [30, 0]) {
+    // Crudos de hace 2 días, de hace 20 horas y de recién, más un agregado de
+    // 1 minuto (resolución que ya no existe) de recién.
+    for (const [resolucion, horas] of [
+      ['raw', 48],
+      ['raw', 20],
+      ['raw', 0],
+      ['1m', 0],
+    ] as const) {
       await db.execute(sql`
         INSERT INTO host_metric_samples (
           host_id, resolution, ts, cpu_total, cpu_user, cpu_system, cpu_nice, cpu_idle,
@@ -263,7 +285,7 @@ describe.skipIf(!hayBase)('integración con PostgreSQL', () => {
           mem_cached, mem_buffers, swap_total, swap_used, uptime_seconds,
           net_rx_bps, net_tx_bps, disk_read_bps, disk_write_bps, sample_count
         ) VALUES (
-          ${HOST}, 'raw', now() - (${dias} || ' days')::interval,
+          ${HOST}, ${resolucion}, now() - (${horas} || ' hours')::interval,
           10, 1, 1, 0, 90, 0, 0, 0, 0, '[]'::jsonb,
           0.5, 0.5, 0.5, 4, 1000, 500, 500, 200, 200, 100, 0, 0, 1000,
           0, 0, 0, 0, 1
@@ -271,14 +293,14 @@ describe.skipIf(!hayBase)('integración con PostgreSQL', () => {
       `)
     }
 
-    const preferencias = await leerPreferencias(db)
-    await correrRetencion(db, { ...preferencias, retencionRawDias: 7 })
+    await correrRetencion(db)
 
-    const r = await db.execute<{ n: number }>(sql`
-      SELECT count(*)::int AS n FROM host_metric_samples
-      WHERE host_id = ${HOST} AND resolution = 'raw'
+    const r = await db.execute<{ resolution: string; n: number }>(sql`
+      SELECT resolution, count(*)::int AS n FROM host_metric_samples
+      WHERE host_id = ${HOST} GROUP BY resolution
     `)
-    expect(r.rows[0]?.n).toBe(1)
+    // Las últimas 24 h de crudos quedan enteras; lo de 1 minuto se va.
+    expect(r.rows).toEqual([{ resolution: 'raw', n: 2 }])
   })
 
   /* --- Locks, instantánea y alertas -------------------------------------- */
@@ -343,11 +365,11 @@ describe.skipIf(!hayBase)('integración con PostgreSQL', () => {
   it('las preferencias se leen tal como se guardaron', async () => {
     const originales = await leerPreferencias(db)
     try {
-      const nuevas = await guardarPreferencias(db, { zonaHoraria: 'UTC', retencionRawDias: 3 })
+      const nuevas = await guardarPreferencias(db, { zonaHoraria: 'UTC', logsMaxLineas: 300 })
       expect(nuevas.zonaHoraria).toBe('UTC')
-      expect(nuevas.retencionRawDias).toBe(3)
+      expect(nuevas.logsMaxLineas).toBe(300)
       // Los campos no tocados sobreviven.
-      expect(nuevas.retencionCincoMinutosDias).toBe(originales.retencionCincoMinutosDias)
+      expect(nuevas.logsMaxBytes).toBe(originales.logsMaxBytes)
     } finally {
       await guardarPreferencias(db, originales)
     }

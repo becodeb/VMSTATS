@@ -1,6 +1,5 @@
 import type { APIRoute } from 'astro'
 import { esquemaConsultaHistorial, rangoDesdeClave } from '@vmstats/shared'
-import { leerPreferencias } from '@vmstats/db'
 import { base } from '@/lib/base'
 import { consultarHistorial } from '@/lib/historial'
 import { eventosEnRango } from '@/lib/despliegues'
@@ -45,7 +44,6 @@ export const GET: APIRoute = async ({ url }) =>
     }
 
     const db = base()
-    const preferencias = await leerPreferencias(db)
 
     const [respuesta, eventos] = await Promise.all([
       consultarHistorial(db, {
@@ -53,7 +51,6 @@ export const GET: APIRoute = async ({ url }) =>
         hasta,
         series: consulta.series,
         hostId: consulta.hostId,
-        preferencias,
       }),
       // Los despliegues se superponen a los gráficos: ver el pico de CPU al
       // lado del deploy que lo causó es la mitad del valor de esta vista.

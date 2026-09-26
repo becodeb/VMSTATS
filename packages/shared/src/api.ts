@@ -156,9 +156,6 @@ export const esquemaSilenciarRegla = z.object({
 
 export const esquemaPreferencias = z.object({
   zonaHoraria: z.string().min(1).max(64),
-  retencionRawDias: z.number().int().min(1).max(90),
-  retencionUnMinutoDias: z.number().int().min(1).max(400),
-  retencionCincoMinutosDias: z.number().int().min(1).max(1200),
   logsHabilitados: z.boolean(),
 })
 export type Preferencias = z.infer<typeof esquemaPreferencias>

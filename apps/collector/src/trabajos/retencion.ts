@@ -1,20 +1,32 @@
+import { setTimeout as esperar } from 'node:timers/promises'
 import { sql } from 'drizzle-orm'
-import type { BaseDatos, PreferenciasApp } from '@vmstats/db'
+import { CLAVES_RESOLUCION, RETENCION_HORAS, type Resolucion } from '@vmstats/shared'
+import type { BaseDatos } from '@vmstats/db'
 
 /* ============================================================================
  * Retención.
  *
+ * Esquema fijo, progresivo (ver RETENCION_HORAS en @vmstats/shared):
+ *
+ *   crudos 26 h  →  5 min 3 días  →  15 min 7 días  →  se borra
+ *
+ * Además se borra cualquier resolución que ya no exista en el esquema (los
+ * agregados de 1 minuto de la versión anterior), sin importar su antigüedad.
+ *
  * Borra en tandas acotadas en vez de un `DELETE` gigante. Un borrado de varios
  * millones de filas toma locks largos y hace crecer el WAL de golpe; en una VM
  * chica eso se nota como una pausa en todo lo demás, justo el tipo de problema
- * que este sistema tendría que estar detectando y no causando.
+ * que este sistema tendría que estar detectando y no causando. Entre tanda y
+ * tanda hay una pausa corta para que la ingesta y el autovacuum respiren.
  * ========================================================================== */
 
-const TAMANIO_TANDA = 20_000
-/** Techo de tandas por corrida: si hay mucho atraso, se sigue en la próxima. */
-const MAX_TANDAS = 50
+const TAMANIO_TANDA = 10_000
+/** Techo de tandas por tabla y corrida: si hay mucho atraso, se sigue en la
+ *  próxima (el collector la adelanta cuando `quedaTrabajo`). */
+const MAX_TANDAS = 60
+const PAUSA_ENTRE_TANDAS_MS = 150
 
-const TABLAS = [
+export const TABLAS_METRICAS = [
   'host_metric_samples',
   'network_metric_samples',
   'disk_metric_samples',
@@ -28,39 +40,63 @@ export interface ResultadoRetencion {
 }
 
 /**
- * Borra las filas de una resolución más viejas que su ventana.
+ * Condiciones de «vencida» para una tabla: una por resolución —cada una se
+ * resuelve con el índice (resolution, ts)— y una más para las resoluciones que
+ * ya no existen en el esquema.
+ */
+function condicionesVencidas(retencion: Record<Resolucion, number>) {
+  const conocidas = sql.join(
+    CLAVES_RESOLUCION.map((r) => sql`${r}`),
+    sql`, `,
+  )
+  return [
+    ...CLAVES_RESOLUCION.map(
+      (r) =>
+        sql`resolution = ${r} AND ts < now() - make_interval(hours => ${retencion[r]}::int)`,
+    ),
+    sql`resolution NOT IN (${conocidas})`,
+  ]
+}
+
+/**
+ * Borra una tanda tras otra hasta que no quede nada vencido o se llegue al
+ * techo de la corrida.
  *
- * El `ctid` es la dirección física de la fila: seleccionar por ctid y borrar
- * por ctid es la forma barata de acotar una tanda sin tener que ordenar por un
- * índice.
+ * Se selecciona por `ctid` (la dirección física de la fila) y se borra con
+ * `ctid = ANY(ARRAY(...))`: así Postgres resuelve el borrado con un Tid Scan.
+ * La variante `ctid IN (SELECT ...)` puede terminar en un semi-join que agrega
+ * y ordena cada tanda antes de borrar.
  */
 async function purgarTabla(
   db: BaseDatos,
   tabla: string,
-  resolucion: string,
-  dias: number,
+  retencion: Record<Resolucion, number>,
 ): Promise<ResultadoRetencion> {
   let borradas = 0
+  let tandas = 0
 
-  for (let tanda = 0; tanda < MAX_TANDAS; tanda += 1) {
-    const resultado = await db.execute(
-      sql`
+  for (const vencida of condicionesVencidas(retencion)) {
+    for (;;) {
+      if (tandas >= MAX_TANDAS) return { borradas, quedaTrabajo: true }
+      tandas += 1
+
+      const resultado = await db.execute(sql`
         DELETE FROM ${sql.raw(tabla)}
-        WHERE ctid IN (
+        WHERE ctid = ANY(ARRAY(
           SELECT ctid FROM ${sql.raw(tabla)}
-          WHERE resolution = ${resolucion}
-            AND ts < now() - ${sql.raw(`interval '${dias} days'`)}
+          WHERE ${vencida}
           LIMIT ${TAMANIO_TANDA}
-        )
-      `,
-    )
+        ))
+      `)
 
-    const filas = resultado.rowCount ?? 0
-    borradas += filas
-    if (filas < TAMANIO_TANDA) return { borradas, quedaTrabajo: false }
+      const filas = resultado.rowCount ?? 0
+      borradas += filas
+      if (filas < TAMANIO_TANDA) break
+      await esperar(PAUSA_ENTRE_TANDAS_MS)
+    }
   }
 
-  return { borradas, quedaTrabajo: true }
+  return { borradas, quedaTrabajo: false }
 }
 
 export interface ResumenRetencion {
@@ -72,23 +108,15 @@ export interface ResumenRetencion {
 
 export async function correrRetencion(
   db: BaseDatos,
-  preferencias: PreferenciasApp,
+  retencion: Record<Resolucion, number> = RETENCION_HORAS,
 ): Promise<ResumenRetencion> {
-  const ventanas: readonly [string, number][] = [
-    ['raw', preferencias.retencionRawDias],
-    ['1m', preferencias.retencionUnMinutoDias],
-    ['5m', preferencias.retencionCincoMinutosDias],
-  ]
-
   let metricas = 0
   let quedaTrabajo = false
 
-  for (const tabla of TABLAS) {
-    for (const [resolucion, dias] of ventanas) {
-      const resultado = await purgarTabla(db, tabla, resolucion, dias)
-      metricas += resultado.borradas
-      if (resultado.quedaTrabajo) quedaTrabajo = true
-    }
+  for (const tabla of TABLAS_METRICAS) {
+    const resultado = await purgarTabla(db, tabla, retencion)
+    metricas += resultado.borradas
+    if (resultado.quedaTrabajo) quedaTrabajo = true
   }
 
   // Los intentos de login sólo sirven para el rate limiting de la última hora;

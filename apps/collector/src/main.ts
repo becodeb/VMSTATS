@@ -37,7 +37,8 @@ import type { EstadoDespliegue } from '@vmstats/shared'
  *   - muestreo      cada 5 s   → memoria
  *   - persistencia  cada 10 s  → base + NOTIFY + evaluación de alertas
  *   - Coolify       5 s / 30 s → adaptativo, con backoff
- *   - mantenimiento cada 60 s  → rollups; cada hora, retención
+ *   - mantenimiento cada 5 min → rollups; cada hora (o antes si quedó atraso),
+ *                                retención
  *
  * Todas las métricas salen por PostgreSQL: el collector escribe y hace NOTIFY,
  * y web lee. No hay ningún puerto involucrado en ese camino.
@@ -290,27 +291,38 @@ async function main(): Promise<void> {
 
   /* --- Mantenimiento -------------------------------------------------- */
 
+  /* Rollups cada 5 minutos: es el ancho del bucket más fino, correr más
+   * seguido sólo recalculaba lo mismo. La primera corrida usa la ventana larga
+   * (`arranque`) para reparar lo que haya quedado sin agregar mientras el
+   * collector estuvo caído. Retención cada hora, y en la vuelta siguiente si
+   * la anterior no llegó a terminar (después de una purga grande). */
   let ciclosMantenimiento = 0
+  let retencionPendiente = true
 
   const detenerMantenimiento = cadaTanto(
-    60_000,
+    300_000,
     async () => {
+      const arranque = ciclosMantenimiento === 0
       ciclosMantenimiento += 1
 
       await conLock(pool, 'rollup1m', async () => {
-        const resultados = await correrTodosLosRollups(db)
-        const total = resultados.reduce((suma, r) => suma + r.filasHost, 0)
-        if (total > 0) registrar('info', `rollup: ${total} bucket(s) de host`)
+        const resultados = await correrTodosLosRollups(db, arranque)
+        const total = resultados.reduce(
+          (suma, r) => suma + r.filasHost + r.filasContenedor + r.filasRed + r.filasDisco + r.filasFilesystem,
+          0,
+        )
+        if (arranque || total > 0) registrar('info', `rollup: ${total} bucket(s) escritos`)
       })
 
-      // Retención una vez por hora: borrar más seguido no cambia nada y cada
-      // pasada toca las cinco tablas de métricas.
-      if (ciclosMantenimiento % 60 === 1) {
+      if (retencionPendiente || ciclosMantenimiento % 12 === 0) {
         await conLock(pool, 'retencion', async () => {
-          const preferencias = await leerPreferencias(db)
-          const resumen = await correrRetencion(db, preferencias)
+          const resumen = await correrRetencion(db)
+          retencionPendiente = resumen.quedaTrabajo
           if (resumen.metricas > 0) {
-            registrar('info', `retención: ${resumen.metricas} fila(s) borradas`)
+            registrar(
+              'info',
+              `retención: ${resumen.metricas} fila(s) borradas${resumen.quedaTrabajo ? ', sigue en la próxima vuelta' : ''}`,
+            )
           }
         })
       }

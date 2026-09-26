@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { z } from 'zod'
-import { esquemaError } from '@vmstats/shared'
+import { esquemaError, formatearDuracion, RETENCION_HORAS, type Resolucion } from '@vmstats/shared'
 import { ClavesApi } from '@/componentes/ClavesApi'
 import { InspectorLateral } from '@/componentes/InspectorLateral'
 import { Button } from '@/components/ui/button'
@@ -9,20 +9,16 @@ import { Aviso, Campo, Esqueleto, Rotulo } from '@/components/ui/varios'
 /* ============================================================================
  * Preferencias de la instancia.
  *
- * Zona horaria de visualización, retención y el interruptor de los logs de
- * contenedor. Es la pantalla a la que apunta el mensaje de error cuando alguien
- * pide logs con la función apagada.
+ * Zona horaria de visualización y el interruptor de los logs de contenedor.
+ * Es la pantalla a la que apunta el mensaje de error cuando alguien pide logs
+ * con la función apagada.
  *
- * La retención se edita acá y la aplica el collector en su próxima pasada: no
- * hay un botón de «purgar ahora» porque borrar meses de métricas no debería
- * estar a un clic de distancia.
+ * La retención se muestra pero no se edita: es fija (RETENCION_HORAS) porque es
+ * lo que mantiene acotado el disco de la VM.
  * ========================================================================== */
 
 const esquemaRespuesta = z.object({
   zonaHoraria: z.string(),
-  retencionRawDias: z.number(),
-  retencionUnMinutoDias: z.number(),
-  retencionCincoMinutosDias: z.number(),
   logsHabilitados: z.boolean(),
   logsMaxLineas: z.number(),
   logsMaxBytes: z.number(),
@@ -31,6 +27,12 @@ const esquemaRespuesta = z.object({
 })
 
 type Preferencias = z.infer<typeof esquemaRespuesta>
+
+const TRAMOS_RETENCION: readonly { resolucion: Resolucion; etiqueta: string }[] = [
+  { resolucion: 'raw', etiqueta: 'Datos crudos (host cada 10 s, contenedores cada 30 s)' },
+  { resolucion: '5m', etiqueta: 'Agregado de 5 minutos' },
+  { resolucion: '15m', etiqueta: 'Agregado de 15 minutos' },
+]
 
 /** Zonas frecuentes; se puede escribir cualquier otra válida de la IANA. */
 const ZONAS_SUGERIDAS = [
@@ -157,33 +159,19 @@ export function Preferencias({ csrf, onCerrar, onGuardado }: Props) {
 
           <section className="flex flex-col gap-3">
             <h3 className="text-sm font-medium">Retención</h3>
-            <CampoDias
-              id="raw"
-              etiqueta="Datos crudos (cada 10 s)"
-              valor={datos.retencionRawDias}
-              max={90}
-              guardando={guardando}
-              onGuardar={(v) => void guardar({ retencionRawDias: v })}
-            />
-            <CampoDias
-              id="un-minuto"
-              etiqueta="Agregado de 1 minuto"
-              valor={datos.retencionUnMinutoDias}
-              max={400}
-              guardando={guardando}
-              onGuardar={(v) => void guardar({ retencionUnMinutoDias: v })}
-            />
-            <CampoDias
-              id="cinco-minutos"
-              etiqueta="Agregado de 5 minutos"
-              valor={datos.retencionCincoMinutosDias}
-              max={1200}
-              guardando={guardando}
-              onGuardar={(v) => void guardar({ retencionCincoMinutosDias: v })}
-            />
+            <dl className="flex flex-col gap-1.5">
+              {TRAMOS_RETENCION.map(({ resolucion, etiqueta }) => (
+                <div key={resolucion} className="flex items-center justify-between gap-3 text-xs">
+                  <dt className="min-w-0 flex-1">{etiqueta}</dt>
+                  <dd className="text-muted-foreground tabular-nums">
+                    {formatearDuracion(RETENCION_HORAS[resolucion] * 3600)}
+                  </dd>
+                </div>
+              ))}
+            </dl>
             <p className="text-muted-foreground text-xs">
-              El collector aplica la retención una vez por hora. Bajar un valor borra datos
-              en la próxima pasada y no se puede deshacer.
+              El collector agrega y aplica la retención solo, en tandas chicas. Nada se
+              guarda más de siete días.
             </p>
           </section>
 
@@ -230,45 +218,5 @@ export function Preferencias({ csrf, onCerrar, onGuardado }: Props) {
         </div>
       )}
     </InspectorLateral>
-  )
-}
-
-function CampoDias({
-  id,
-  etiqueta,
-  valor,
-  max,
-  guardando,
-  onGuardar,
-}: {
-  id: string
-  etiqueta: string
-  valor: number
-  max: number
-  guardando: boolean
-  onGuardar: (valor: number) => void
-}) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <Rotulo htmlFor={id} className="min-w-0 flex-1 text-xs font-normal">
-        {etiqueta}
-      </Rotulo>
-      <div className="flex items-center gap-2">
-        <Campo
-          id={id}
-          type="number"
-          min={1}
-          max={max}
-          defaultValue={valor}
-          disabled={guardando}
-          className="w-24"
-          onBlur={(e) => {
-            const nuevo = Number(e.target.value)
-            if (Number.isFinite(nuevo) && nuevo !== valor) onGuardar(nuevo)
-          }}
-        />
-        <span className="text-muted-foreground text-xs">días</span>
-      </div>
-    </div>
   )
 }

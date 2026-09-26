@@ -65,7 +65,7 @@ sistema operativo.
 ## El esquema: una columna en vez de tres tablas
 
 La decisión central del modelo de datos. En vez de `host_metric_samples`,
-`host_metric_samples_1m` y `host_metric_samples_5m`, hay **una** tabla con una
+`host_metric_samples_5m` y `host_metric_samples_15m`, hay **una** tabla con una
 columna `resolution` dentro de la clave primaria:
 
 ```
@@ -80,27 +80,42 @@ Con eso:
 
 Tres tablas paralelas habrían triplicado el mismo SQL con distinto nombre.
 
-### Agregación
+### Agregación y retención
 
-| Resolución | Intervalo | Retención por defecto |
-| --- | --- | --- |
-| `raw` | 10 s | 7 días |
-| `1m` | 1 minuto | 30 días |
-| `5m` | 5 minutos | 365 días |
+Retención progresiva y fija (`RETENCION_HORAS` en `packages/shared/src/tiempo.ts`):
 
-Los rollups **recalculan una ventana móvil reciente** en cada corrida en vez de
-llevar una marca de agua, y usan `ON CONFLICT DO UPDATE`. Así el sistema se
-repara solo: si el collector estuvo caído dos horas, la primera corrida al
-volver rellena el hueco sin que nadie ejecute nada a mano.
+| Resolución | Intervalo | Se guarda | La lee |
+| --- | --- | --- | --- |
+| `raw` | 10 s host · 30 s contenedores · 60 s filesystems | 26 horas | rangos de 15 min a 24 h |
+| `5m` | 5 minutos | 3 días | rangos viejos de más de 26 h y menos de 3 días |
+| `15m` | 15 minutos | 7 días | el rango de 7 días |
 
-Sólo se agregan buckets **ya cerrados**. Un bucket del minuto en curso está
-incompleto, y guardarlo daría un promedio calculado sobre dos muestras que
-después nunca se corrige.
+Nada se guarda más de siete días. Las resoluciones se solapan —el agregado de 15
+minutos también cubre las últimas horas— porque cada consulta lee de una sola
+fuente; el volumen lo ponen los crudos, así que solaparse cuesta poco. `15m` y
+no `30m` en el tramo largo porque el gráfico de 7 días pide buckets de 900 s.
+
+La retención corre dentro del collector una vez por hora (y en la vuelta
+siguiente si quedó atraso), en tandas de 10.000 filas por `ctid` con una pausa
+entre tandas, así la ingesta nunca espera un lock largo. También borra
+cualquier resolución que ya no exista en el esquema.
+
+Los rollups corren cada 5 minutos y **recalculan una ventana móvil reciente**
+(1 h de crudos, 3 h de agregados de 5 min) en vez de llevar una marca de agua, y
+al arrancar el collector una ventana larga (24 h y 7 días) que repara lo que
+haya quedado sin agregar. Usan `ON CONFLICT DO UPDATE … WHERE EXCLUDED.sample_count
+> actual`: un bucket sólo se reescribe si ahora resume más muestras. Recalcular
+un bucket cerrado da lo mismo, y reescribirlo igual cada minuto era lo que
+llenaba las tablas de tuplas muertas.
+
+Sólo se agregan buckets **ya cerrados**. Un bucket del intervalo en curso está
+incompleto; se agrega en la corrida siguiente.
 
 **Qué se pierde al agregar:** los gauges y las tasas se promedian, los
-contadores de errores se suman. Un pico de un minuto se diluye en el promedio de
-cinco. Por eso los datos crudos cada 10 s se guardan siete días — que es donde
-se mira un incidente reciente.
+contadores de errores se suman, lo monótono (uptime, reinicios, memoria total)
+va con `max` y el filesystem se queda con el último valor del bucket. Un pico de
+un minuto se diluye en el promedio de cinco. Por eso las últimas 24 horas se
+guardan con resolución completa: es donde se mira un incidente reciente.
 
 ### Cuántos puntos devuelve una consulta
 
@@ -111,7 +126,7 @@ de bucket, con dos restricciones a la vez:
 1. entre 300 y 800 puntos por serie,
 2. la resolución de origen tiene que existir todavía para ese rango.
 
-Pedir 30 días nunca manda 260.000 filas al navegador. Si hubo que degradar la
+Pedir 7 días nunca manda 60.000 filas al navegador. Si hubo que degradar la
 granularidad por retención, la respuesta lo dice y la UI lo muestra en vez de
 mentir.
 

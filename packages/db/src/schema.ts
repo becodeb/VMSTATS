@@ -34,7 +34,7 @@ import type { Capacidades, Presion, Proceso, Puerto, Temperatura } from '@vmstat
  * ========================================================================== */
 
 /** Debe coincidir con `Resolucion` de @vmstats/shared. */
-export type Resolucion = 'raw' | '1m' | '5m'
+export type Resolucion = 'raw' | '5m' | '15m'
 
 const ts = (nombre: string) => timestamp(nombre, { withTimezone: true, mode: 'date' })
 const tsAuto = () => timestamp({ withTimezone: true, mode: 'date' })
@@ -319,8 +319,9 @@ export const muestrasContenedor = pgTable(
   },
   (t) => [
     primaryKey({ columns: [t.hostId, t.contenedorId, t.resolucion, t.ts] }),
+    // Sólo (resolución, ts): un índice aparte por `ts` duplicaba a éste y
+    // llegó a pesar más de un GB sin que ninguna consulta lo usara.
     index('container_samples_res_ts_idx').on(t.resolucion, t.ts),
-    index('container_samples_ts_idx').on(t.ts),
   ],
 )
 

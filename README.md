@@ -147,7 +147,7 @@ El rollup es un `INSERT … SELECT` sobre la misma tabla y la retención un
 `DELETE`. Tres tablas paralelas habrían triplicado el mismo SQL.
 
 **El servidor elige la resolución.** El navegador pide un rango; el planificador
-devuelve entre 300 y 800 puntos por serie. Pedir 30 días nunca manda 260.000
+devuelve entre 300 y 800 puntos por serie. Pedir 7 días nunca manda 60.000
 filas.
 
 **«Sin datos» es un estado de primera clase.** Si el collector dejó de reportar,

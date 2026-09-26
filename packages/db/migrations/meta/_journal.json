@@ -15,6 +15,13 @@
       "when": 1786724557346,
       "tag": "0001_claves_api",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790380597812,
+      "tag": "0002_retencion_progresiva",
+      "breakpoints": true
     }
   ]
 }
