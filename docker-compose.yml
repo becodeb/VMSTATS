@@ -20,6 +20,50 @@ services:
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
+    # Configuración chica a propósito: la VM tiene 4 GB compartidos con otras
+    # apps y la base, con la retención de 7 días, entra holgada en unos cientos
+    # de MB. Pocas conexiones (collector 4 + web 8 + migración), WAL acotado
+    # para que una purga grande no llene el disco, y autovacuum más atento en
+    # tablas que borran filas todas las horas.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=96MB
+      - -c
+      - effective_cache_size=256MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - max_connections=30
+      - -c
+      - wal_buffers=4MB
+      - -c
+      - min_wal_size=64MB
+      - -c
+      - max_wal_size=512MB
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - autovacuum_vacuum_scale_factor=0.05
+      - -c
+      - autovacuum_analyze_scale_factor=0.05
+      - -c
+      - autovacuum_max_workers=2
+      - -c
+      - max_worker_processes=4
+      - -c
+      - max_parallel_workers=2
+      - -c
+      - max_parallel_workers_per_gather=1
+    # Techos, no reservas: si algo se desboca, que lo pague vmstats y no las
+    # demás apps de la VM.
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-vmstats}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?definí POSTGRES_PASSWORD en .env}
@@ -76,6 +120,11 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - docker-interna
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 64M
     security_opt:
       - no-new-privileges:true
     # `web` no está en esta red: no puede llegar al proxy ni por accidente.
@@ -109,8 +158,13 @@ services:
       COLLECTOR_TOKEN_INTERNO: ${COLLECTOR_TOKEN_INTERNO:-}
       COLLECTOR_PUERTO_INTERNO: 8787
 
-      COLLECTOR_INTERVALO_MUESTRA_MS: ${COLLECTOR_INTERVALO_MUESTRA_MS:-5000}
+      COLLECTOR_INTERVALO_MUESTRA_MS: ${COLLECTOR_INTERVALO_MUESTRA_MS:-10000}
       COLLECTOR_INTERVALO_PERSISTENCIA_MS: ${COLLECTOR_INTERVALO_PERSISTENCIA_MS:-10000}
+      COLLECTOR_INTERVALO_CONTENEDORES_MS: ${COLLECTOR_INTERVALO_CONTENEDORES_MS:-30000}
+      COLLECTOR_INTERVALO_FILESYSTEM_MS: ${COLLECTOR_INTERVALO_FILESYSTEM_MS:-60000}
+
+      # Heap acotado: el collector vive con ~80 MB y no tiene por qué crecer.
+      NODE_OPTIONS: --max-old-space-size=128
     volumes:
       # Sólo lectura. El collector no escribe nada en el host.
       - /proc:/host/proc:ro
@@ -130,6 +184,11 @@ services:
       # El archivo de vida del healthcheck. Es lo único que el collector
       # escribe fuera de PostgreSQL.
       - /tmp:size=8m,mode=1777
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
     # `privileged: true` no hace falta y no se usa: leer /proc y /sys montados
     # como sólo lectura alcanza para todo lo que mide vmstats.
 
@@ -152,6 +211,8 @@ services:
       # y la UI lo explica.
       COLLECTOR_URL_INTERNA: http://collector:8787
       COLLECTOR_TOKEN_INTERNO: ${COLLECTOR_TOKEN_INTERNO:-}
+
+      NODE_OPTIONS: --max-old-space-size=160
     ports:
       - '${VMSTATS_PUERTO:-4321}:4321'
     networks:
@@ -165,6 +226,11 @@ services:
     tmpfs:
       # El adaptador de Node guarda las sesiones de Astro en disco.
       - /tmp:size=16m
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
 
 networks:
   interna:

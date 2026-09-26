@@ -34,8 +34,9 @@ import type { EstadoDespliegue } from '@vmstats/shared'
  * Proceso collector.
  *
  * Cuatro relojes independientes:
- *   - muestreo      cada 5 s   → memoria
+ *   - muestreo      cada 10 s  → memoria
  *   - persistencia  cada 10 s  → base + NOTIFY + evaluación de alertas
+ *                                (contenedores cada 30 s, filesystems cada 60 s)
  *   - Coolify       5 s / 30 s → adaptativo, con backoff
  *   - mantenimiento cada 5 min → rollups; cada hora (o antes si quedó atraso),
  *                                retención
@@ -199,15 +200,28 @@ async function main(): Promise<void> {
 
   const intervaloSegundos = Math.round(config.intervaloMuestraMs / 1000)
 
+  /* Contenedores y filesystems se guardan cada N ciclos de persistencia. La
+   * instantánea en vivo y las alertas siguen viendo todos los ciclos. */
+  const cadaCiclos = (ms: number): number =>
+    Math.max(1, Math.round(ms / config.intervaloPersistenciaMs))
+  const ciclosContenedores = cadaCiclos(config.intervaloContenedoresMs)
+  const ciclosFilesystem = cadaCiclos(config.intervaloFilesystemMs)
+  let ciclosPersistencia = 0
+
   const detenerPersistencia = cadaTanto(
     config.intervaloPersistenciaMs,
     async () => {
       const muestra = estado.ultimaMuestra
       if (muestra === null) return
 
+      const ciclo = ciclosPersistencia
+      ciclosPersistencia += 1
+
       await registrarHost(db, muestra)
-      await guardarMuestraHost(db, muestra)
-      await guardarContenedores(db, estado.contenedores)
+      await guardarMuestraHost(db, muestra, { filesystems: ciclo % ciclosFilesystem === 0 })
+      if (ciclo % ciclosContenedores === 0) {
+        await guardarContenedores(db, estado.contenedores)
+      }
       await registrarLatido(db, muestra, config.version, intervaloSegundos)
 
       // Las alertas se evalúan acá y no en el muestreo para que la instantánea

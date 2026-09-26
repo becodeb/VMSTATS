@@ -128,7 +128,16 @@ function agregados(muestra: MuestraHost): {
   return { redRx, redTx, discoLectura, discoEscritura }
 }
 
-export async function guardarMuestraHost(db: BaseDatos, muestra: MuestraHost): Promise<void> {
+export interface OpcionesMuestraHost {
+  /** false para saltear las filas de filesystem en este ciclo. */
+  filesystems?: boolean
+}
+
+export async function guardarMuestraHost(
+  db: BaseDatos,
+  muestra: MuestraHost,
+  opciones: OpcionesMuestraHost = {},
+): Promise<void> {
   const ts = new Date(muestra.ts)
   const agg = agregados(muestra)
 
@@ -179,7 +188,7 @@ export async function guardarMuestraHost(db: BaseDatos, muestra: MuestraHost): P
     })
     .onConflictDoNothing()
 
-  await guardarFilesystems(db, muestra, ts)
+  if (opciones.filesystems !== false) await guardarFilesystems(db, muestra, ts)
   await guardarRed(db, muestra, ts)
   await guardarDiscos(db, muestra, ts)
 }

@@ -16,15 +16,32 @@ const booleano = z
 const esquemaEntorno = z.object({
   DATABASE_URL: z.string().min(1, 'DATABASE_URL es obligatoria'),
 
-  /** Cada cuánto se toma una muestra en memoria. */
-  COLLECTOR_INTERVALO_MUESTRA_MS: z.coerce.number().int().min(1000).max(60_000).default(5_000),
-  /** Cada cuánto se escribe a la base. Múltiplo del anterior. */
+  /** Cada cuánto se toma una muestra en memoria. Igual a la persistencia por
+   *  defecto: muestrear más seguido de lo que se guarda y se publica sólo
+   *  gastaba CPU (y llamadas a Docker) en muestras que nadie veía. */
+  COLLECTOR_INTERVALO_MUESTRA_MS: z.coerce.number().int().min(1000).max(60_000).default(10_000),
+  /** Cada cuánto se escribe a la base y se publica la instantánea. */
   COLLECTOR_INTERVALO_PERSISTENCIA_MS: z.coerce
     .number()
     .int()
     .min(5_000)
     .max(300_000)
     .default(10_000),
+  /** Cada cuánto se guardan filas de contenedores. Son el 90 % del volumen y
+   *  ningún gráfico las lee a 10 s: la vista en vivo sale de la instantánea. */
+  COLLECTOR_INTERVALO_CONTENEDORES_MS: z.coerce
+    .number()
+    .int()
+    .min(5_000)
+    .max(600_000)
+    .default(30_000),
+  /** Cada cuánto se guardan filas de filesystems: cambian despacio. */
+  COLLECTOR_INTERVALO_FILESYSTEM_MS: z.coerce
+    .number()
+    .int()
+    .min(5_000)
+    .max(600_000)
+    .default(60_000),
 
   /* Raíces del host. Dentro del contenedor, el compose monta el /proc real en
    * /host/proc; sin esto el collector mediría su propio contenedor. */
@@ -65,6 +82,8 @@ export interface Configuracion {
   urlBase: string
   intervaloMuestraMs: number
   intervaloPersistenciaMs: number
+  intervaloContenedoresMs: number
+  intervaloFilesystemMs: number
   procfs: {
     raizProc: string
     raizSys: string
@@ -110,6 +129,8 @@ export function cargarConfiguracion(entorno: NodeJS.ProcessEnv = process.env): C
     urlBase: parseado.DATABASE_URL,
     intervaloMuestraMs: parseado.COLLECTOR_INTERVALO_MUESTRA_MS,
     intervaloPersistenciaMs: parseado.COLLECTOR_INTERVALO_PERSISTENCIA_MS,
+    intervaloContenedoresMs: parseado.COLLECTOR_INTERVALO_CONTENEDORES_MS,
+    intervaloFilesystemMs: parseado.COLLECTOR_INTERVALO_FILESYSTEM_MS,
     procfs: {
       raizProc: parseado.HOST_PROC,
       raizSys: parseado.HOST_SYS,
@@ -148,6 +169,8 @@ export function describir(config: Configuracion): Record<string, string | number
     base: 'configurada',
     intervaloMuestraMs: config.intervaloMuestraMs,
     intervaloPersistenciaMs: config.intervaloPersistenciaMs,
+    intervaloContenedoresMs: config.intervaloContenedoresMs,
+    intervaloFilesystemMs: config.intervaloFilesystemMs,
     raizProc: config.procfs.raizProc,
     docker: config.docker.modo,
     coolify: config.coolify.habilitado ? 'habilitado' : 'apagado',
